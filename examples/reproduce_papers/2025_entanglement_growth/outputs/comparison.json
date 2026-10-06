@@ -1,0 +1,53 @@
+{
+  "L": 16,
+  "sample_counts": {
+    "hamiltonian": 72,
+    "rqc": 72,
+    "baee": 72
+  },
+  "haar_half_filling": 7.151249944669515,
+  "comparisons": {
+    "thermal": {
+      "growth_rmse_bits": 0.08712623512248556
+    },
+    "AL": {
+      "growth_rmse_bits": 0.029081631342214632
+    },
+    "free": {
+      "growth_rmse_bits": 0.04841734272097438
+    },
+    "MBL": {
+      "growth_rmse_bits": 0.09148576088804626
+    },
+    "Floquet": {
+      "growth_rmse_bits": 0.10460074304972115
+    },
+    "RQC_thermal": {
+      "growth_rmse_bits": 0.09434046506672175
+    },
+    "RQC_A": {
+      "growth_rmse_bits": 0.00837889728687369
+    },
+    "RQC_B": {
+      "growth_rmse_bits": 0.046354853954932176
+    },
+    "RQC_C": {
+      "growth_rmse_bits": 0.09060514454614145
+    },
+    "RQC_D": {
+      "growth_rmse_bits": 0.1320730169006933
+    },
+    "RQC_SWAP": {
+      "growth_rmse_bits": 0.1133896156145079
+    },
+    "FIG3_HCEE": {
+      "entropy_rmse_bits": 0.05222417542142388
+    },
+    "FIG3_BAEE": {
+      "entropy_rmse_bits": 0.021000102720618634
+    },
+    "FIG3_difference": {
+      "entropy_rmse_bits": 0.035168526923055644
+    }
+  }
+}

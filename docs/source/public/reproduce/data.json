@@ -279,6 +279,51 @@
     "code_url": "https://github.com/tensorcircuit/tensorcircuit-ng/tree/master/examples/reproduce_papers/2026_nqs_tvmc_blurred_sampling"
   },
   {
+    "slug": "2025_entanglement_growth",
+    "title": "Entanglement Growth from Entangled States: A Unified Perspective on Entanglement Generation and Transport",
+    "card_title": "Figures 1(d,e) and 3 · Entanglement growth",
+    "summary": "Entangled initial states reveal nonmonotonic growth and a hidden reservoir measured by bipartition-averaged entropy.",
+    "description": "Figures 1(d), 1(e) and 3 of arXiv:2510.08344. A small-system demo and an opt-in L=16 configuration use the conserved half-filled sector, TC Pauli Hamiltonians and TC two-qubit gates. TC backend jit, vmap and scan accelerate entropy and random circuits; NumPy retains spectral and long-time phase preparation. Paper-scale evidence is identified separately from newly generated small-system output; finite-size, sampling and long-time numerical differences are documented.",
+    "authors": [
+      "Chun-Yue Zhang",
+      "Zi-Xiang Li",
+      "Shi-Xin Zhang"
+    ],
+    "contributor": "QingyunQian",
+    "year": 2025,
+    "arxiv_id": "2510.08344",
+    "url": "https://arxiv.org/abs/2510.08344",
+    "tags": [
+      "entanglement",
+      "many-body-physics",
+      "random-circuit",
+      "floquet-dynamics"
+    ],
+    "tc_features": [
+      "circuit",
+      "pauli-operator",
+      "jit",
+      "vmap",
+      "scan"
+    ],
+    "backend": "jax",
+    "hardware": {
+      "gpu": false,
+      "min_memory": "2GB"
+    },
+    "figures": [
+      {
+        "target": "Figures 1(d), 1(e), and 3",
+        "source": "outputs/result.png",
+        "figure": "figures/2025_entanglement_growth__result.webp",
+        "thumb": "thumbs/2025_entanglement_growth__result.webp",
+        "script": "main.py"
+      }
+    ],
+    "artifacts": [],
+    "code_url": "https://github.com/tensorcircuit/tensorcircuit-ng/tree/master/examples/reproduce_papers/2025_entanglement_growth"
+  },
+  {
     "slug": "2025_qntk_diagnostics",
     "title": "Towards Practical Quantum Neural Network Diagnostics with Neural Tangent Kernels",
     "card_title": "Figure 2 · QNTK diagnostics",

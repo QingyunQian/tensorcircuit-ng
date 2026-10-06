@@ -1,0 +1,37 @@
+title: "Entanglement Growth from Entangled States: A Unified Perspective on Entanglement Generation and Transport"
+arxiv_id: "2510.08344"
+url: "https://arxiv.org/abs/2510.08344"
+year: 2025
+authors:
+  - "Chun-Yue Zhang"
+  - "Zi-Xiang Li"
+  - "Shi-Xin Zhang"
+tags:
+  - "entanglement"
+  - "many-body-physics"
+  - "random-circuit"
+  - "floquet-dynamics"
+tc_features:
+  - "circuit"
+  - "pauli-operator"
+  - "jit"
+  - "vmap"
+  - "scan"
+backend: "jax"
+hardware_requirements:
+  gpu: false
+  min_memory: "2GB"
+card_title: "Figures 1(d,e) and 3 · Entanglement growth"
+summary: "Entangled initial states reveal nonmonotonic growth and a hidden reservoir measured by bipartition-averaged entropy."
+description: >-
+  Figures 1(d), 1(e) and 3 of arXiv:2510.08344. A small-system demo and an
+  opt-in L=16 configuration use the conserved half-filled sector, TC Pauli
+  Hamiltonians and TC two-qubit gates. TC backend jit, vmap and scan accelerate
+  entropy and random circuits; NumPy retains spectral and long-time phase
+  preparation. Paper-scale evidence is identified
+  separately from newly generated small-system output; finite-size,
+  sampling and long-time numerical differences are documented.
+outputs:
+  - target: "Figures 1(d), 1(e), and 3"
+    path: "outputs/result.png"
+    script: "main.py"
