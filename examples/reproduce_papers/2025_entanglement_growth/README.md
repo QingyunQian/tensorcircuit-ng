@@ -54,7 +54,7 @@ There is no Trotter or MPS truncation. At t≈10^12, finite-precision eigenvalue
 
 The results show an interior maximum at τ=3 for MBL, Floquet MBL and asymptotic SWAP, at mean initial HCEE ≈1.426 bits. The hidden reservoir also peaks at τ=3. Comparisons with the authors' published averages give Fig. 3 RMSEs of 0.0522 (HCEE), 0.0210 (BAEE) and 0.0352 bits (difference).
 
-`outputs/comparison.json` records these comparison metrics. The plotting command uses the summary file and does not download reference data or recompute the metrics. Some RQC plateaus differ by about 0.17–0.21 bits.
+`outputs/comparison.json` records these comparison metrics. The plotting command uses the summary file and does not download reference data or recompute the metrics.
 
 The method and comparison reference is the [authors' repository at commit 368bce4](https://github.com/Chunyue-Zhang/Entanglement-Growth-from-Entangled-States/tree/368bce429a1e5e227ad3a0967578e5bbe8614e61). No author code, pickle files or source-paper images are redistributed here. Compared with its public script defaults, this example follows the supplementary methods' independent thermal quench, 72-sample count and specified saturation windows, and includes the thermal and SWAP circuit protocols.
 
