@@ -283,7 +283,7 @@
     "title": "Entanglement Growth from Entangled States: A Unified Perspective on Entanglement Generation and Transport",
     "card_title": "Figures 1(d,e) and 3 · Entanglement growth",
     "summary": "Entangled initial states reveal nonmonotonic growth and a hidden reservoir measured by bipartition-averaged entropy.",
-    "description": "Figures 1(d), 1(e) and 3 of arXiv:2510.08344. A small-system demo and an opt-in L=16 configuration use the conserved half-filled sector, TC Pauli Hamiltonians and TC two-qubit gates. TC backend jit, vmap and scan accelerate entropy and random circuits; NumPy retains spectral and long-time phase preparation. Paper-scale evidence is identified separately from newly generated small-system output; finite-size, sampling and long-time numerical differences are documented.",
+    "description": "Figures 1(d), 1(e) and 3 of arXiv:2510.08344. A small-system demo and an opt-in L=16 configuration use the conserved half-filled sector, TC Pauli Hamiltonians and TC two-qubit gates. TC backend jit, vmap and scan accelerate entropy and random circuits; NumPy retains spectral and long-time phase preparation. The three panels show L=16 results with 72 disorder samples per group; finite-size, sampling and long-time numerical differences are documented.",
     "authors": [
       "Chun-Yue Zhang",
       "Zi-Xiang Li",

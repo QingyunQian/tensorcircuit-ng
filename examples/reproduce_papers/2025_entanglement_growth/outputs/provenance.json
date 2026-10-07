@@ -1,5 +1,5 @@
 {
-  "plot_label": "Archived independent L=16 calculation",
+  "plot_label": "Paper-scale reproduction",
   "paper": "https://arxiv.org/abs/2510.08344v2",
   "source_calculation_completed": "2026-09-18",
   "source_tensorcircuit_version": "1.9.1",

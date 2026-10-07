@@ -6,7 +6,7 @@ Link: https://arxiv.org/abs/2510.08344
 Description:
 This example reproduces Figures 1(d), 1(e), and 3 with TensorCircuit-NG.
 The default L=8 demo is a finite-size demonstration. The L=16 preset is costly.
-Use --plot-only to redraw the bundled independent L=16 research summary.
+Use --plot-only to plot the L=16 results from outputs/summary.npz.
 """
 
 import argparse
@@ -67,7 +67,7 @@ def main():
     summary = aggregate(output, config)
     np.savez_compressed(output / "summary.npz", **summary)
     label = (
-        "New L=16 simulation"
+        "Paper-scale reproduction"
         if args.preset == "paper"
         else "Small-system demonstration"
     )
