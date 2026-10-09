@@ -283,7 +283,7 @@
     "title": "Entanglement Growth from Entangled States: A Unified Perspective on Entanglement Generation and Transport",
     "card_title": "Figures 1(d,e) and 3 · Entanglement growth",
     "summary": "Entangled initial states reveal nonmonotonic growth and a hidden reservoir measured by bipartition-averaged entropy.",
-    "description": "Small-system demonstration of Figures 1(d), 1(e) and 3 of arXiv:2510.08344. The script generates the displayed L=8 results from eight disorder samples, with two depth-400 circuit realizations per sample and all 35 distinct equal bipartitions. It uses TC Pauli Hamiltonians and two-qubit gates in the half-filled sector. TC backend jit, vmap and scan accelerate entropy and circuits; CPU spectral preprocessing preserves long-time phase reduction. MBL and Floquet growth and the BAEE reservoir show the paper's qualitative trends at this reduced system size.",
+    "description": "L=12 reproduction of Figures 1(d), 1(e) and 3 of arXiv:2510.08344. The script generates the displayed results from 72 disorder samples, with five depth-2000 circuit realizations per sample and all 462 distinct equal bipartitions. It uses TC Pauli Hamiltonians and two-qubit gates in the half-filled sector. TC backend jit, vmap and scan accelerate entropy and circuits; CPU spectral preprocessing preserves long-time phase reduction. Independent samples can run in parallel. The system is reduced from the paper's L=16; comparisons focus on the three panels' trends.",
     "authors": [
       "Chun-Yue Zhang",
       "Zi-Xiang Li",

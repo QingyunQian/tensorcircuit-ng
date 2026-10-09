@@ -18,14 +18,15 @@ from main import (
 import tensorcircuit as tc
 
 
-def full_entropy(state, length, cut):
+def full_entropy(state, length, cut, eps=0.0):
     """Full-Hilbert-space SVD reference, independent of sector/cut index maps."""
     rest = tuple(site for site in range(length) if site not in cut)
     matrix = state.reshape([2] * length).transpose(tuple(cut) + rest)
     singular = np.linalg.svd(matrix.reshape(2 ** len(cut), -1), compute_uv=False)
     probabilities = singular**2 / np.sum(np.abs(state) ** 2)
+    probabilities = (probabilities + eps) / (1 + len(probabilities) * eps)
     probabilities = probabilities[probabilities > 0]
-    return -np.sum(probabilities * np.log2(probabilities))
+    return -np.sum(probabilities * np.log2(probabilities + eps))
 
 
 def full_gate(states, unitary, bond, length):
@@ -125,13 +126,14 @@ def verify_kernels(length):
         )
         reference = [full_entropy(s, length, cut) for s in full.T]
         np.testing.assert_allclose(actual, reference, atol=2e-12)
+        # TC's generic helper regularizes both the density matrix and logarithm.
         np.testing.assert_allclose(
-            actual,
+            [full_entropy(s, length, cut, eps=1e-12) for s in full.T],
             [
                 tc.quantum.entanglement_entropy(s, subsystem_to_keep=cut) / np.log(2)
                 for s in full.T
             ],
-            atol=1e-9,
+            atol=2e-12,
             rtol=0,
         )
         rest = tuple(site for site in range(length) if site not in cut)
@@ -221,5 +223,5 @@ if __name__ == "__main__":
     with tc.runtime_backend("numpy"), tc.runtime_dtype("complex128"):
         for size in (4, 6):
             verify_physics(size)
-        for size in (4, 6, 8):
+        for size in (4, 6, 8, 12):
             verify_kernels(size)

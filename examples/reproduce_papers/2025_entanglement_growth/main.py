@@ -4,15 +4,17 @@ A Unified Perspective on Entanglement Generation and Transport"
 Link: https://arxiv.org/abs/2510.08344
 
 Description:
-Small-system demonstration of Figures 1(d), 1(e), and 3 at L=8.
+Reproduction of Figures 1(d), 1(e), and 3 at L=12 with 72 disorder samples.
 Run main.py to generate outputs/summary.npz and outputs/result.png;
 use --plot-only to redraw the generated data.
 """
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from itertools import combinations
 from math import comb
+from multiprocessing import get_context
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -21,13 +23,18 @@ from scipy.special import digamma
 
 import tensorcircuit as tc
 
-L = 8
-SAMPLES = 8
+L = 12
+SAMPLES = 72
 SEED = 20260917
-TAU = np.array([0, 0.5, 1, 2, 3, 4.5, 7, 12, 32, 500])
-DEPTH = 400
-REALIZATIONS = 2
-BAEE_TIMES = np.unique(np.r_[np.linspace(0, 100, 31), np.logspace(2, 4, 11)])
+TAU = np.r_[
+    np.arange(0, 3.25, 0.25),
+    [3.3, 3.6, 3.9, 4.2, 4.5],
+    np.arange(5, 10.5, 0.5),
+    [11, 12.2, 13.7, 15.7, 19, 24, 32, 500],
+]
+DEPTH = 2000
+REALIZATIONS = 5
+BAEE_TIMES = np.linspace(0, 50, 101)
 OUTPUT = Path(__file__).resolve().parent / "outputs"
 PROTOCOLS = {
     "thermal": (np.pi / 2, np.pi),
@@ -237,8 +244,18 @@ class JaxKernels:
         return K.numpy(K.mean(means, axis=0))
 
 
-def sample(number, kernels):
+@lru_cache(maxsize=1)
+def simulation_kernels():
+    """Initialize the CPU preprocessing and JAX kernels once per worker."""
+    tc.set_backend("numpy")
+    tc.set_dtype("complex128")
+    tc.set_contractor("greedy")
+    return JaxKernels(L)
+
+
+def sample(number):
     """One disorder sample; average circuit realizations before computing SEM."""
+    kernels = simulation_kernels()
     K = tc.backend
     rng = np.random.default_rng(np.random.SeedSequence([SEED, number]))
     initial_index = int(rng.integers(len(kernels.idx)))
@@ -256,6 +273,7 @@ def sample(number, kernels):
     psi0 = K.scatter(K.zeros((len(kernels.idx),)), [[initial_index]], [1.0 + 0j])
     preparation = Evolution(hamiltonian(L, fields["prep"]))
     states = K.stack(list(preparation.at(psi0, TAU)), axis=1)
+    del preparation
     initial = kernels.hcee(states)
     out = {"hamiltonian_initial_hcee": initial, "rqc_initial_hcee": initial}
     for name, jz in [("thermal", 0.5), ("MBL", 0.5), ("AL", 0.0), ("free", 0.0)]:
@@ -270,12 +288,14 @@ def sample(number, kernels):
     out["hamiltonian_sat_Floquet"] = kernels.hcee(
         next(floquet.at(states, [300_000_000_000]))
     )
+    del floquet, ev
     out["rqc_initial_baee"] = kernels.baee(states)
     bonds = rng.integers(0, L - 1, (REALIZATIONS, DEPTH))
     for name, angles in PROTOCOLS.items():
         out[f"rqc_rqc_sat_{name}"] = kernels.rqc(states, gate(*angles), bonds)
     evolution = Evolution(hamiltonian(L, fields["baee"]))
     states = K.stack(list(evolution.at(psi0, BAEE_TIMES)), axis=1)
+    del evolution
     out["baee_baee_hcee"] = kernels.hcee(states)
     out["baee_baee_mean"] = kernels.baee(states)
     return out
@@ -414,7 +434,7 @@ def plot(summary):
     fig.text(
         0.5,
         0.035,
-        f"Small-system demonstration  |  L={length}, "
+        f"Entanglement growth  |  L={length}, "
         f"{int(summary['samples'])} disorder samples per group  |  "
         "Error bars: one SEM; dashed lines: fixed-charge Haar mean",
         ha="center",
@@ -427,21 +447,25 @@ def plot(summary):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plot-only", action="store_true")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Independent disorder workers; each needs about 2 GB RAM",
+    )
     args = parser.parse_args()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     if args.plot_only:
         with np.load(OUTPUT / "summary.npz", allow_pickle=False) as summary:
             plot(summary)
         return
-    # CPU eigensolvers and extended-precision phases; one JAX simulation engine.
-    tc.set_backend("numpy")
-    tc.set_dtype("complex128")
-    tc.set_contractor("greedy")
-    kernels = JaxKernels(L)
-    records = []
-    for number in range(SAMPLES):
-        records.append(sample(number, kernels))
-        print(f"Completed disorder sample {number + 1}/{SAMPLES}", flush=True)
+    with ProcessPoolExecutor(
+        max_workers=args.workers, mp_context=get_context("spawn")
+    ) as pool:
+        records = []
+        for number, record in enumerate(pool.map(sample, range(SAMPLES)), start=1):
+            records.append(record)
+            print(f"Completed disorder sample {number}/{SAMPLES}", flush=True)
     summary = aggregate(records)
     np.savez_compressed(OUTPUT / "summary.npz", **summary)
     plot(summary)
