@@ -1,39 +1,44 @@
-"""
-Reproduction of "Entanglement Growth from Entangled States:
-A Unified Perspective on Entanglement Generation and Transport"
-Link: https://arxiv.org/abs/2510.08344
+"""Independent full-space checks for the entanglement-growth example."""
 
-Independent small-system checks for the example, using full-space references.
-"""
-
-import argparse
 from itertools import combinations
 from math import comb
 
 import numpy as np
-from accelerated import JaxKernels
-from physics import (
-    Entropy,
+from scipy.linalg import expm
+from main import (
     Evolution,
     Floquet,
-    SectorGates,
+    JaxKernels,
+    PROTOCOLS,
     gate,
     hamiltonian,
     sector_indices,
 )
-from scipy.linalg import expm
 
 import tensorcircuit as tc
 
 
-def verify(length):
-    """Check Hamiltonians, evolution, all gate types, entropy and SWAP invariance."""
+def full_entropy(state, length, cut):
+    """Full-Hilbert-space SVD reference, independent of sector/cut index maps."""
+    rest = tuple(site for site in range(length) if site not in cut)
+    matrix = state.reshape([2] * length).transpose(tuple(cut) + rest)
+    singular = np.linalg.svd(matrix.reshape(2 ** len(cut), -1), compute_uv=False)
+    probabilities = singular**2 / np.sum(np.abs(state) ** 2)
+    probabilities = probabilities[probabilities > 0]
+    return -np.sum(probabilities * np.log2(probabilities))
+
+
+def full_gate(states, unitary, bond, length):
+    """Apply a gate to full-space tensor axes, with states in columns."""
+    tensor = states.reshape(2**bond, 4, 2 ** (length - bond - 2), -1)
+    return np.einsum("ab,lbrs->lars", unitary, tensor).reshape(states.shape)
+
+
+def verify_physics(length):
     rng = np.random.default_rng(91)
     indices = sector_indices(length)
     psi = rng.normal(size=len(indices)) + 1j * rng.normal(size=len(indices))
     psi /= np.linalg.norm(psi)
-    full = np.zeros(2**length, dtype=complex)
-    full[indices] = psi
     spin = [
         np.array([[0, 1], [1, 0]]) / 2,
         np.array([[0, -1j], [1j, 0]]) / 2,
@@ -66,17 +71,7 @@ def verify(length):
             next(evolution.at(psi, [time])), expm(-1j * time * matrix) @ psi, atol=2e-12
         )
     np.testing.assert_allclose(np.linalg.norm(next(evolution.at(psi, [1e15]))), 1)
-
-    mapper = SectorGates(length)
-    for alpha, beta in (
-        (0, np.pi),
-        (np.pi / 2, 0),
-        (np.pi, 0),
-        (np.pi, np.pi / 2),
-        (np.pi, np.pi),
-        (np.pi / 2, np.pi),
-    ):
-        unitary = gate(alpha, beta)
+    for alpha, beta in [*PROTOCOLS.values(), (np.pi, np.pi)]:
         expected = expm(
             -1j
             * (
@@ -84,64 +79,11 @@ def verify(length):
                 + beta * np.kron(spin[2], spin[2])
             )
         )
-        np.testing.assert_allclose(unitary, expected, atol=1e-13)
-        for bond in range(length - 1):
-            circuit = tc.Circuit(length, inputs=full)
-            circuit.any(bond, bond + 1, unitary=unitary)
-            np.testing.assert_allclose(
-                mapper.apply(psi, unitary, bond), circuit.state()[indices], atol=1e-13
-            )
-    # A non-symmetric charge-conserving gate catches accidental transposition.
-    circuit = tc.Circuit(2)
-    circuit.rz(0, theta=0.37)
-    circuit.any(0, 1, unitary=gate(np.pi / 2, np.pi / 3))
-    unitary = circuit.matrix()
-    for bond in range(length - 1):
-        reference = tc.Circuit(length, inputs=full)
-        reference.any(bond, bond + 1, unitary=unitary)
-        expected = reference.state()[indices]
-        np.testing.assert_allclose(
-            mapper.apply(psi, unitary, bond), expected, atol=1e-13
-        )
-        states = np.column_stack((psi, 1j * psi))
-        np.testing.assert_allclose(
-            mapper.apply(states, unitary, bond),
-            np.column_stack((expected, 1j * expected)),
-            atol=1e-13,
-        )
-    entropy = Entropy(length)
-    for cut in combinations(range(length), length // 2):
-        rest = tuple(site for site in range(length) if site not in cut)
-        matrix = (
-            full.reshape([2] * length)
-            .transpose(cut + rest)
-            .reshape(2 ** (length // 2), -1)
-        )
-        probabilities = np.linalg.svd(matrix, compute_uv=False) ** 2
-        probabilities = probabilities[probabilities > 0]
-        expected = -np.sum(probabilities * np.log2(probabilities))
-        np.testing.assert_allclose(entropy.value(psi, cut), expected, atol=1e-12)
-        # TC's generic helper uses natural logs and a small density regularizer.
-        np.testing.assert_allclose(
-            entropy.value(psi, cut),
-            tc.quantum.entanglement_entropy(full, subsystem_to_keep=cut) / np.log(2),
-            atol=1e-9,
-            rtol=0,
-        )
-        np.testing.assert_allclose(
-            entropy.value(psi, cut), entropy.value(psi, rest), atol=1e-12
-        )
-    cuts = entropy.cuts()
-    assert len(cuts) == comb(length, length // 2) // 2
-    before = entropy.average(psi, cuts)
-    state = psi.copy()
-    for bond in rng.permutation(length - 1):
-        state = mapper.apply(state, gate(np.pi, np.pi), bond)
-        np.testing.assert_allclose(entropy.average(state, cuts), before, atol=1e-12)
-    # One Bell pair crossing the middle cut fixes the logarithm convention.
-    bell = np.zeros(len(sector_indices(4)), dtype=complex)
-    bell[np.isin(sector_indices(4), [0b0101, 0b0011])] = 1 / np.sqrt(2)
-    np.testing.assert_allclose(Entropy(4).value(bell), 1, atol=1e-12)
+        np.testing.assert_allclose(gate(alpha, beta), expected, atol=1e-13)
+    swap = np.eye(4)[[0, 2, 1, 3]]
+    np.testing.assert_allclose(
+        gate(np.pi, np.pi), np.exp(-1j * np.pi / 4) * swap, atol=1e-13
+    )
     floquet = Floquet(length, fields)
     expected = expm(-1j * hamiltonian(length, fields, jz=1, jxy=0)) @ expm(
         -0.4j * hamiltonian(length, np.zeros(length), jz=0)
@@ -152,83 +94,132 @@ def verify(length):
             np.linalg.matrix_power(expected, period) @ psi,
             atol=2e-12,
         )
-    print(
-        f"L={length}: passed XXZ, evolution, TC gates, entropy, SWAP, and Floquet checks."
-    )
+    print(f"L={length}: passed XXZ, evolution, gate exponentials, and Floquet checks.")
 
 
-def verify_acceleration(length):
-    """Check compiled batches and late-window scans against the NumPy path."""
+def verify_kernels(length):
+    """Compare JAX batches and scans with full-space SVD and TC circuits."""
     rng = np.random.default_rng(671)
-    entropy = Entropy(length)
-    states = rng.normal(size=(len(entropy.idx), 3)) + 1j * rng.normal(
-        size=(len(entropy.idx), 3)
+    kernels = JaxKernels(length)
+    indices = sector_indices(length)
+    states = rng.normal(size=(len(indices), 3)) + 1j * rng.normal(
+        size=(len(indices), 3)
     )
     states[:, 0] = 0
     states[0, 0] = 1
     states /= np.linalg.norm(states, axis=0)
-    kernels = JaxKernels(length)
+    full = np.zeros((2**length, 3), dtype=complex)
+    full[indices] = states
+    half = tuple(range(length // 2))
     np.testing.assert_allclose(
         kernels.hcee(states),
-        [entropy.value(s) for s in states.T],
+        [full_entropy(s, length, half) for s in full.T],
         atol=2e-12,
-        rtol=1e-11,
     )
-    cuts = entropy.cuts()
-    np.testing.assert_allclose(
-        kernels.baee(states, cuts),
-        entropy.average_many(states, cuts),
-        atol=2e-12,
-        rtol=1e-11,
-    )
-    # 107 layers cover the warmup/late-window boundary in the two scans.
-    bonds = rng.integers(0, length - 1, (2, 107))
-    mapper = SectorGates(length)
-    unitaries = [
-        gate(a, b)
-        for a, b in (
-            (np.pi / 2, np.pi),
-            (0, np.pi),
-            (np.pi / 2, 0),
-            (np.pi, 0),
-            (np.pi, np.pi / 2),
-            (np.pi, np.pi),
+    # Every cut, including complements; the generic TC helper uses natural logs.
+    K = kernels.K
+    entropy_batch = K.jit(K.vmap(kernels.entropy_at, vectorized_argnums=0))
+    for cut in combinations(range(length), length // 2):
+        actual = K.numpy(
+            entropy_batch(K.convert_to_tensor(states.T), kernels.cut_maps(cut))
         )
-    ]
+        reference = [full_entropy(s, length, cut) for s in full.T]
+        np.testing.assert_allclose(actual, reference, atol=2e-12)
+        np.testing.assert_allclose(
+            actual,
+            [
+                tc.quantum.entanglement_entropy(s, subsystem_to_keep=cut) / np.log(2)
+                for s in full.T
+            ],
+            atol=1e-9,
+            rtol=0,
+        )
+        rest = tuple(site for site in range(length) if site not in cut)
+        np.testing.assert_allclose(
+            actual, [full_entropy(s, length, rest) for s in full.T], atol=2e-12
+        )
+    assert len(kernels.cuts) == comb(length, length // 2) // 2
+    np.testing.assert_allclose(
+        kernels.baee(states),
+        np.mean(
+            [[full_entropy(s, length, cut) for s in full.T] for cut in kernels.cuts],
+            axis=0,
+        ),
+        atol=2e-12,
+    )
+    before = kernels.baee(states[:, 1:2])
+    state = full[:, 1].copy()
+    for bond in rng.permutation(length - 1):
+        circuit = tc.Circuit(length, inputs=state)
+        circuit.any(int(bond), int(bond) + 1, unitary=gate(np.pi, np.pi))
+        state = circuit.state()
+        np.testing.assert_allclose(
+            kernels.baee(state[indices, None]), before, atol=2e-12
+        )
+
+    unitaries = [gate(a, b) for a, b in [*PROTOCOLS.values(), (np.pi, np.pi)]]
+    # A non-symmetric charge-conserving gate catches accidental transposition.
     circuit = tc.Circuit(2)
     circuit.rz(0, theta=0.37)
     circuit.any(0, 1, unitary=gate(np.pi / 2, np.pi / 3))
     unitaries.append(circuit.matrix())
-    K = kernels.K
+    # 107 layers exercise both the warmup and final 100-layer measurement scan.
+    bonds = rng.integers(0, length - 1, (2, 107))
     for unitary in unitaries:
+        for bond in range(length - 1):
+            expected = full_gate(full, unitary, bond, length)
+            for column, initial in enumerate(full.T):
+                circuit = tc.Circuit(length, inputs=initial)
+                circuit.any(bond, bond + 1, unitary=unitary)
+                np.testing.assert_allclose(
+                    expected[:, column], circuit.state(), atol=2e-12
+                )
+            # Also check the short-circuit branch, where the warmup is empty.
+            final, mean = kernels.circuit(
+                K.convert_to_tensor(states.T),
+                K.convert_to_tensor(unitary),
+                K.convert_to_tensor(np.array([[bond]])),
+            )
+            np.testing.assert_allclose(
+                K.numpy(final[0]), expected[indices].T, atol=2e-12
+            )
+            np.testing.assert_allclose(
+                K.numpy(mean[0]),
+                [full_entropy(s, length, half) for s in expected.T],
+                atol=2e-12,
+            )
         finals, means = kernels.circuit(
             K.convert_to_tensor(states.T),
             K.convert_to_tensor(unitary),
             K.convert_to_tensor(bonds),
         )
-        finals, means = K.numpy(finals), K.numpy(means)
         for realization, sequence in enumerate(bonds):
-            state, total = states.copy(), np.zeros(states.shape[1])
+            state, total = full.copy(), np.zeros(states.shape[1])
             for depth, bond in enumerate(sequence):
-                state = mapper.apply(state, unitary, bond)
+                state = full_gate(state, unitary, bond, length)
                 if depth >= len(sequence) - 100:
-                    total += [entropy.value(s) for s in state.T]
+                    total += [full_entropy(s, length, half) for s in state.T]
             np.testing.assert_allclose(
-                finals[realization], state.T, atol=2e-12, rtol=1e-11
+                K.numpy(finals[realization]), state[indices].T, atol=2e-12, rtol=1e-11
             )
             np.testing.assert_allclose(
-                means[realization], total / 100, atol=2e-12, rtol=1e-11
+                K.numpy(means[realization]), total / 100, atol=2e-12, rtol=1e-11
             )
-    print(f"L={length}: passed JAX entropy batches, all cuts, and circuit scans.")
+        np.testing.assert_allclose(
+            kernels.rqc(states, unitary, bonds), K.numpy(means).mean(axis=0), atol=2e-12
+        )
+    if length == 4:
+        bell = np.zeros((len(indices), 1), dtype=complex)
+        bell[np.isin(indices, [0b0101, 0b0011]), 0] = 1 / np.sqrt(2)
+        np.testing.assert_allclose(kernels.hcee(bell), [1], atol=2e-12)
+    print(
+        f"L={length}: passed JAX batches, every cut, TC gates, SWAP, and circuit scans."
+    )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--numpy-only", action="store_true")
-    args = parser.parse_args()
     with tc.runtime_backend("numpy"), tc.runtime_dtype("complex128"):
-        for length in (4, 6):
-            verify(length)
-        if not args.numpy_only:
-            for length in (4, 6, 8):
-                verify_acceleration(length)
+        for size in (4, 6):
+            verify_physics(size)
+        for size in (4, 6, 8):
+            verify_kernels(size)

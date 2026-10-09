@@ -1,12 +1,8 @@
 # Entanglement growth from entangled states
 
-This example targets three panels: Figure 1(d), Figure 1(e), and Figure 3 of [Zhang, Li and Zhang, arXiv:2510.08344v2](https://arxiv.org/abs/2510.08344v2), published in [PRL 137, 020404 (2026)](https://doi.org/10.1103/xkh7-gdqm). The folder uses the first arXiv year, 2025.
-
-A thermal XXZ quench prepares entangled states from half-filled product states. Subsequent MBL, Floquet and random-circuit dynamics reveal the distinction between creating entanglement and redistributing entanglement already present. The bipartition-averaged entropy (BAEE) exposes a reservoir invisible to half-chain entanglement entropy (HCEE).
+Small-system demonstration of Figures 1(d), 1(e), and 3 of [Zhang, Li and Zhang, arXiv:2510.08344](https://arxiv.org/abs/2510.08344). A thermal XXZ quench prepares entangled states; subsequent Hamiltonian and random-circuit dynamics distinguish entanglement generation from redistribution. Bipartition-averaged entropy (BAEE) measures the reservoir beyond half-chain entropy (HCEE).
 
 ## Run
-
-Use an environment with this TensorCircuit-NG checkout, JAX, NumPy, SciPy, cotengra and matplotlib:
 
 ```bash
 python -m pip install -e '.[jax]' matplotlib cotengra
@@ -15,60 +11,30 @@ python verify.py
 python main.py
 ```
 
-The default `demo.json` uses L=8, eight disorder samples per group, two circuit realizations, depth 400 and all 35 distinct equal bipartitions. The default JAX engine writes to `outputs/demo/jax/`. It reduces lattice size, preparation-time resolution, circuit depth and sample count. It is a finite-size demonstration and an implementation check; the paper-scale results use L=16. In particular, finite-depth circuits need not have reached their asymptotic entropies.
+`main.py` generates both committed outputs, `outputs/summary.npz` and `outputs/result.png`. Parameters at the top of the script use L=8, eight independent disorder samples, seed 20260917, two circuit realizations per sample, depth 400, and all 35 distinct equal bipartitions. The summary stores means, one-SEM errors, time grids and these run parameters. `python main.py --plot-only` redraws the summary. Output paths are relative to the script, regardless of the working directory.
 
-JAX accelerates entropy batches and whole random-circuit trajectories through TensorCircuit's `K.jit`, `K.vmap` and `K.scan`. CPU spectral preparation retains the original NumPy-backend eigensolver, Floquet Schur decomposition and extended-precision phase reduction. Use `python main.py --engine numpy` for the reference implementation without JAX kernels; it writes to `outputs/demo/numpy/`. An environment without JAX can run `python verify.py --numpy-only` and the NumPy engine.
-
-Plot the paper-scale results:
-
-```bash
-python main.py --plot-only
-```
-
-Run the full, expensive configuration explicitly:
-
-```bash
-python main.py --preset paper
-```
-
-This uses L=16, 72 samples per group, five circuit realizations, depth 2000 and all 6435 cuts. It writes to `outputs/paper/jax/` and leaves the bundled summary intact. Use at least 2 GB RAM for the default demo and plan for approximately 32 GB per L=16 worker. No GPU is required; the reported benchmarks use JAX on CPU.
-
-Paths are relative to this example regardless of the shell's current directory. `--output` selects another directory. Repeating a run skips complete samples with matching configuration hashes. Partial files are inspection checkpoints; a partial sample is recomputed from its beginning. Run only one process per output directory.
+The JAX engine uses TensorCircuit's `K.jit`, `K.vmap` and `K.scan` for charge-block entropy and circuit trajectories. CPU spectral preprocessing retains `eigh`, complex Schur decomposition and extended-precision phase reduction through the TC NumPy backend. No GPU is required.
 
 ## Numerical conventions
 
-- Open boundaries, total Sz=0; site 0 is the most significant computational bit. The model is `sum(Sx Sx + Sy Sy + Jz Sz Sz) + sum(h Sz)`, with S=σ/2, Jz=0.5 and independent uniform disorder for preparation (W=0.5), thermal quench (W=0.5), MBL (W=5), AL (W=5, Jz=0), Floquet (W=5) and Fig. 3 (W=0.5).
-- Hamiltonians use `tc.quantum.PauliStringSum2COO`. A static sparse projection selects the conserved sector. Spectral preparation uses the NumPy backend and complex128. JAX kernels use a separate TC backend handle, preserving the CPU preprocessing context. This mixed workflow does not provide end-to-end autodifferentiation through spectral preparation.
-- Entropy uses charge-block `K.svd` in bits. TC's generic `tc.quantum.entanglement_entropy` works on a full state, uses natural logarithms and regularizes the density matrix; it is checked separately in `verify.py`. Keeping charge blocks avoids expanding a sector of dimension 12870 to a full 65536-component state and reduces the largest L=16 decomposition from 256×256 to 70×70. BAEE streams chunks of 32 cuts, covering every configured cut without materializing all cut/time intermediates.
-- The two-site gate is exp[-i(α(SxSx+SySy)+βSzSz)], generated by a two-qubit `tc.Circuit` with rxx/ryy angles α/2 and rzz angle β/2. The six (α,β) pairs are thermal (π/2,π), A (0,π), B (π/2,0), C (π,0), D (π,π/2), and SWAP (π,π). Each depth unit applies one gate to a uniformly chosen adjacent bond. The five RQC protocols are simulated to their late-depth window; the SWAP curve uses its exact asymptotic BAEE prediction.
-- The Floquet unitary is exp(-i Hz) exp(-0.4i Hxy), where Hz has Jz=1 and Hxy has Jz=0 and zero fields. Evolution uses unit-modulus Schur phases and integer periods, avoiding growth from raising approximate eigenvalue magnitudes to very large powers.
-- Saturation follows supplementary methods I: t=10^12 for thermal/MBL/AL, 3×10^11 Floquet periods, free-fermion averaging over t=201,…,300, and the final 100 circuit depths (1901,…,2000 in the paper preset).
-- Fig. 3 uses its own independent preparation disorder. HCEE uses the first L/2 sites; BAEE averages each equal bipartition/complement pair once. All entropies use log base 2, without an entropy-density normalization. The exact asymptotic SWAP prediction in Fig. 1(e) is the initial BAEE. This example computes saturation curves rather than the separate time-dependent trajectories in Fig. 2.
-- Standard errors use independent disorder samples. Circuit realizations are averaged inside each sample first. Growth/reservoir error bars use paired differences, preserving their covariance. Seeds, sampled fields, bitstrings, cuts and circuit bonds are saved in individual numerical checkpoints.
+- Open boundaries, total Sz=0, S=σ/2, Jz=0.5; site 0 is the most significant bit. Hamiltonians use `tc.quantum.PauliStringSum2COO`. Independent uniform fields have W=0.5 for preparation, thermal quench and Fig. 3, and W=5 for MBL, AL and Floquet. AL and free fermions use Jz=0; free fermions have zero fields.
+- Entropies use log base 2 and charge-block `K.svd`. HCEE keeps the first L/2 sites; BAEE counts each equal bipartition/complement pair once. Circuit realizations are averaged within each disorder sample. Growth and reservoir SEMs use paired differences.
+- Each circuit step applies one gate to a uniformly sampled adjacent bond. The gate is exp[−i(α(SxSx+SySy)+βSzSz)], constructed with TC rotations rxx(α/2), ryy(α/2), rzz(β/2):
 
-There is no Trotter or MPS truncation. At t≈10^12, finite-precision eigenvalues still limit individual phases. Extended-precision phase reduction cannot remove this error (and may equal float64 on some platforms). Compare ensemble trends rather than claiming bitwise agreement at very long times.
+| Protocol | α | β |
+|---|---|---|
+| thermal | π/2 | π |
+| A | 0 | π |
+| B | π/2 | 0 |
+| C | π | 0 |
+| D | π | π/2 |
+| SWAP | π | π |
 
-## Results
+- Thermal/MBL/AL are measured at t=10¹², free fermions are averaged over t=201,…,300, and circuits over depths 301,…,400. The SWAP curve uses its exact asymptotic prediction, the initial BAEE.
+- Floquet evolution uses exp(−i Hz) exp(−0.4i Hxy) for 3×10¹¹ periods, with Jz=1 in Hz and Jz=0 and zero fields in Hxy. There is no Trotter or MPS truncation. Finite-precision eigenvalues still limit very-long-time phases; extended-precision phase reduction does not remove that error.
 
-`outputs/summary.npz` contains L=16 means and one-standard-error arrays from 72 samples for each of the Hamiltonian, random-circuit and BAEE calculations. `outputs/provenance.json` records the configuration, software version and SHA-256 hashes of the source checkpoints and scripts. `outputs/result.png` plots the three target panels using the paper’s axes, one-standard-error bars and a dashed fixed-half-filling complex-Haar mean entropy reference (≈7.15125 bits for L=16). The dashed reference is calculated for the configured system size.
+## Results and verification
 
-The results show an interior maximum at τ=3 for MBL, Floquet MBL and asymptotic SWAP, at mean initial HCEE ≈1.426 bits. The hidden reservoir also peaks at τ=3. Comparisons with the authors' published averages give Fig. 3 RMSEs of 0.0522 (HCEE), 0.0210 (BAEE) and 0.0352 bits (difference).
+The generated L=8 curves show interior maxima for MBL and Floquet entanglement growth and an initially growing, then decreasing BAEE−HCEE reservoir, consistent with the paper's qualitative conclusions. Finite size, eight samples and finite circuit depth affect the detailed curves; this is a **Small-system demonstration** of the three panels. Dashed lines mark the complex-Haar mean in the fixed-charge sector at the simulated L.
 
-`outputs/comparison.json` records these comparison metrics. The plotting command uses the summary file and does not download reference data or recompute the metrics.
-
-The method and comparison reference is the [authors' repository at commit 368bce4](https://github.com/Chunyue-Zhang/Entanglement-Growth-from-Entangled-States/tree/368bce429a1e5e227ad3a0967578e5bbe8614e61). No author code, pickle files or source-paper images are redistributed here. Compared with its public script defaults, this example follows the supplementary methods' independent thermal quench, 72-sample count and specified saturation windows, and includes the thermal and SWAP circuit protocols.
-
-## Verification
-
-`verify.py` checks L=4 and L=6. It compares the XXZ matrix against independent Kronecker products, evolution against a matrix exponential, all six gate types and an additional non-symmetric charge-conserving gate against full TC circuits (including batched states), all small-system equal-cut entropies against full-space SVD and TC's entropy helper, Bell entropy in bits, BAEE invariance under SWAP, and Floquet ordering against direct powers. Additional L=4,6,8 checks compare JAX entropy batches and all equal cuts with NumPy, and check circuit final states and late-window means for all six protocols and a non-symmetric gate. These checks and a full comparison of both demo engines also pass with the repository-pinned JAX 0.7.0.
-
-On an Intel Xeon Platinum 8458P CPU, with both engines restricted to the same eight logical CPUs and one BLAS thread, complete fresh demos took 26.45 s (NumPy) and 12.37 s (JAX), including startup, compilation, all 24 samples and plotting. Peak RSS was about 320 MiB and 441 MiB, respectively. All 512 raw arrays and 58 summary arrays agreed at `rtol=1e-11, atol=2e-12`; the maximum raw-array difference was 4.5e-15. The environment used Python 3.12, TC-NG 1.10.0, JAX 0.9.1, NumPy 2.4.3 and SciPy 1.17.1.
-
-Warmed JAX kernel speedups over NumPy were 2.3–3.7× for HCEE, 2.8–4.4× for BAEE, and 3.9–7.2× for random circuits across L=8,12,16 benchmarks. The L=16 benchmark used four sector states, 64 sampled cuts and one depth-400 circuit realization. Individual first calls can be slower while compiling. The memory budget for the full L=16 configuration remains an estimate.
-
-From the repository root:
-
-```bash
-black --check examples/reproduce_papers/2025_entanglement_growth/*.py
-pylint examples/reproduce_papers/2025_entanglement_growth/*.py
-```
+`verify.py` checks Hamiltonians, evolution and Floquet ordering against independent Kronecker products, matrix exponentials and direct powers at L=4,6. JAX checks at L=4,6,8 compare gates with full TC circuits and entropy batches with full-space SVD and `tc.quantum.entanglement_entropy`, covering all equal cuts, SWAP invariance, and circuit final states and late-window averages. A Bell-pair check fixes the entropy convention in bits.
