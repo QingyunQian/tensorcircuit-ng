@@ -17,7 +17,7 @@ The JAX engine uses TensorCircuit's `K.jit`, `K.vmap` and `K.scan` for charge-bl
 
 ## Numerical conventions
 
-- Open boundaries, total Sz=0, S=σ/2, Jz=0.5; site 0 is the most significant bit. Hamiltonians use `tc.quantum.PauliStringSum2COO`. Independent uniform fields have W=0.5 for preparation, thermal quench and Fig. 3, and W=5 for MBL, AL and Floquet. AL and free fermions use Jz=0; free fermions have zero fields.
+- Open boundaries, total Sz=0, S=σ/2, Jz=0.5; site 0 is the most significant bit. Hamiltonians use `tc.quantum.PauliStringSum2COO`. Independent uniform fields have W=0.5 for preparation and thermal quench, and W=5 for MBL, AL and Floquet. Fig. 3 follows the same preparation evolution that generates the Fig. 1 initial states. AL and free fermions use Jz=0; free fermions have zero fields.
 - Entropies use log base 2 and charge-block `K.svd`. HCEE keeps the first L/2 sites; BAEE counts each equal bipartition/complement pair once. Circuit realizations are averaged within each disorder sample. Growth and reservoir SEMs use paired differences.
 - Each circuit step applies one gate to a uniformly sampled adjacent bond. The gate is exp[−i(α(SxSx+SySy)+βSzSz)], constructed with TC rotations rxx(α/2), ryy(α/2), rzz(β/2):
 

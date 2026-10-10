@@ -267,37 +267,33 @@ def sample(number):
             ("MBL", 5.0),
             ("AL", 5.0),
             ("Floquet", 5.0),
-            ("baee", 0.5),
         ]
     }
     psi0 = K.scatter(K.zeros((len(kernels.idx),)), [[initial_index]], [1.0 + 0j])
     preparation = Evolution(hamiltonian(L, fields["prep"]))
     states = K.stack(list(preparation.at(psi0, TAU)), axis=1)
+    fig3_states = K.stack(list(preparation.at(psi0, BAEE_TIMES)), axis=1)
     del preparation
-    initial = kernels.hcee(states)
-    out = {"hamiltonian_initial_hcee": initial, "rqc_initial_hcee": initial}
-    for name, jz in [("thermal", 0.5), ("MBL", 0.5), ("AL", 0.0), ("free", 0.0)]:
-        ev = Evolution(
-            hamiltonian(L, np.zeros(L) if name == "free" else fields[name], jz)
-        )
-        times = np.arange(201, 301) if name == "free" else [1e12]
-        out[f"hamiltonian_sat_{name}"] = np.mean(
-            [kernels.hcee(s) for s in ev.at(states, times)], axis=0
-        )
-    floquet = Floquet(L, fields["Floquet"], ev)
-    out["hamiltonian_sat_Floquet"] = kernels.hcee(
-        next(floquet.at(states, [300_000_000_000]))
+    out = {
+        "initial_hcee": kernels.hcee(states),
+        "initial_baee": kernels.baee(states),
+        "fig3_hcee": kernels.hcee(fig3_states),
+        "fig3_baee": kernels.baee(fig3_states),
+    }
+    for name, jz in [("thermal", 0.5), ("MBL", 0.5), ("AL", 0.0)]:
+        ev = Evolution(hamiltonian(L, fields[name], jz))
+        out[f"sat_{name}"] = kernels.hcee(next(ev.at(states, [1e12])))
+    # H_XY is both the free-fermion Hamiltonian and the Floquet hopping step.
+    xy = Evolution(hamiltonian(L, np.zeros(L), jz=0))
+    out["sat_free"] = np.mean(
+        [kernels.hcee(s) for s in xy.at(states, np.arange(201, 301))], axis=0
     )
-    del floquet, ev
-    out["rqc_initial_baee"] = kernels.baee(states)
+    floquet = Floquet(L, fields["Floquet"], xy)
+    out["sat_Floquet"] = kernels.hcee(next(floquet.at(states, [300_000_000_000])))
+    del floquet, ev, xy
     bonds = rng.integers(0, L - 1, (REALIZATIONS, DEPTH))
     for name, angles in PROTOCOLS.items():
-        out[f"rqc_rqc_sat_{name}"] = kernels.rqc(states, gate(*angles), bonds)
-    evolution = Evolution(hamiltonian(L, fields["baee"]))
-    states = K.stack(list(evolution.at(psi0, BAEE_TIMES)), axis=1)
-    del evolution
-    out["baee_baee_hcee"] = kernels.hcee(states)
-    out["baee_baee_mean"] = kernels.baee(states)
+        out[f"rqc_{name}"] = kernels.rqc(states, gate(*angles), bonds)
     return out
 
 
@@ -312,18 +308,16 @@ def aggregate(records):
         tau=TAU,
         baee_times=BAEE_TIMES,
     )
+    initial = np.array([r["initial_hcee"] for r in records])
     for key in records[0]:
         values = np.array([record[key] for record in records])
         save_statistics(summary, key, values)
-        if "_sat_" in key or key == "rqc_initial_baee":
-            initial = np.array(
-                [r[key.split("_")[0] + "_initial_hcee"] for r in records]
-            )
+        if key.startswith(("sat_", "rqc_")) or key == "initial_baee":
             save_statistics(summary, key + "_growth", values - initial)
     save_statistics(
         summary,
-        "baee_reservoir",
-        np.array([r["baee_baee_mean"] - r["baee_baee_hcee"] for r in records]),
+        "fig3_reservoir",
+        np.array([r["fig3_baee"] - r["fig3_hcee"] for r in records]),
     )
     return summary
 
@@ -376,11 +370,11 @@ def plot(summary):
     ):
         line(
             axes[0],
-            summary["hamiltonian_initial_hcee"],
-            f"hamiltonian_sat_{name}_growth",
+            summary["initial_hcee"],
+            f"sat_{name}_growth",
             display,
             color,
-            summary["hamiltonian_initial_hcee_sem"],
+            summary["initial_hcee_sem"],
         )
     circuit_labels = (
         r"RQC thermal $\alpha=\pi/2,\ \beta=\pi$",
@@ -393,21 +387,21 @@ def plot(summary):
     for name, display, color in zip(
         ("thermal", "A", "B", "C", "D", "SWAP"), circuit_labels, COLORS
     ):
-        key = "initial_baee" if name == "SWAP" else f"rqc_sat_{name}"
+        key = "initial_baee" if name == "SWAP" else f"rqc_{name}"
         line(
             axes[1],
-            summary["rqc_initial_hcee"],
-            f"rqc_{key}_growth",
+            summary["initial_hcee"],
+            f"{key}_growth",
             display,
             color,
-            summary["rqc_initial_hcee_sem"],
+            summary["initial_hcee_sem"],
         )
     for key, name, color in zip(
-        ("baee_hcee", "baee_mean", "reservoir"),
+        ("hcee", "baee", "reservoir"),
         (r"$S$", r"$\bar{S}$", r"$\bar{S}-S$"),
         (COLORS[2], COLORS[4], COLORS[1]),
     ):
-        line(axes[2], summary["baee_times"], f"baee_{key}", name, color)
+        line(axes[2], summary["baee_times"], f"fig3_{key}", name, color)
     length = int(summary["L"])
     haar = haar_half_filling(length)
     for index, (ax, title) in enumerate(
