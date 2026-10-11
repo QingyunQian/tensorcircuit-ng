@@ -9,6 +9,9 @@ https://arxiv.org/abs/2506.20106. Virtual indices alternate even/odd parity.
 
 import cmath
 import itertools
+import json
+from pathlib import Path
+import time
 import math
 
 import tencirpauli as tcp
@@ -23,7 +26,15 @@ else:
 class FermionPEPS:
     """Open, even-parity PEPS; pack only parity-allowed tensor entries."""
 
-    def __init__(self, rows, columns, bond_dim=2, boundary_dim=None):
+    def __init__(
+        self,
+        rows,
+        columns,
+        bond_dim=2,
+        boundary_dim=None,
+        exact_optimizer="omeco-8-48",
+        path_file=None,
+    ):
         if rows < 2 or columns < 2 or bond_dim < 2 or bond_dim % 2:
             raise ValueError("Use a rectangle of at least 2 x 2 and an even D >= 2.")
         if boundary_dim is not None and boundary_dim < 1:
@@ -64,6 +75,8 @@ class FermionPEPS:
                     self.bonds.append((i, i + 1, 2, 1))
                 if y + 1 < rows:
                     self.bonds.append((i, i + columns, 4, 3))
+        if boundary_dim is None:
+            self.prepare_exact_path(exact_optimizer, path_file)
         self.batch_amplitude = tc.backend.vmap(self.amplitude, vectorized_argnums=1)
         self.value_derivative = tc.backend.value_and_grad(
             lambda theta, occupation: tc.backend.real(self.amplitude(theta, occupation))
@@ -157,7 +170,7 @@ class FermionPEPS:
         """
         Contract a sampled single-layer fermionic PEPS.
 
-        boundary_dim=None uses TensorCircuit's exact contractor. Finite caps call
+        boundary_dim=None uses a cached exact pairwise contraction path. Finite caps call
         TensorCircuit-NG's existing variational boundary-MPS contractor.
         """
         K = tc.backend
@@ -169,11 +182,75 @@ class FermionPEPS:
                 self.contraction_key,
                 num_sweeps=2,
             )
-        nodes = [tc.Gate(tensor) for tensor in tensors]
-        for i, j, ai, aj in self.bonds:
-            nodes[i][ai - 1] ^ nodes[j][aj - 1]
-        result = tc.contractor(nodes, ignore_edge_order=True).tensor
-        return K.reshape(result, ())
+        values = [K.reshape(t, shape) for t, shape in zip(tensors, self.exact_shapes)]
+        for a, b, axes in self.exact_steps:
+            result = K.tensordot(values[a], values[b], axes)
+            values = [v for i, v in enumerate(values) if i not in (a, b)]
+            values.append(result)
+        return K.reshape(values[0], ())
+
+    def prepare_exact_path(self, optimizer="omeco-8-48", path_file=None):
+        """
+        Search once outside JIT, or load a topology-checked pairwise path.
+
+        Exterior dimension-one legs are removed without approximation. Cached
+        steps use only backend tensordot, so configurations, connected states and
+        derivatives share one path, independently of the global contractor.
+        A supplied path file is loaded if present, otherwise searched and saved.
+        """
+        labels = [[None] * 4 for _ in self.shapes]
+        for bond, (i, j, ai, aj) in enumerate(self.bonds):
+            labels[i][ai - 1] = bond
+            labels[j][aj - 1] = bond
+        inputs = [[ix for ix in site if ix is not None] for site in labels]
+        shapes = [[self.bond_dim] * len(site) for site in inputs]
+        topology = {"inputs": inputs, "shapes": shapes, "output": []}
+        path_file = Path(path_file) if path_file is not None else None
+        start = time.perf_counter()
+        if path_file is not None and path_file.exists():
+            record = json.loads(path_file.read_text())
+            if record["topology"] != topology:
+                raise ValueError("The saved contraction path has a different topology.")
+            path = record["path"]
+        else:
+            finder = tc.get_contractor(optimizer).keywords["optimizer"]
+            path = finder(
+                inputs, [], {i: self.bond_dim for i in range(len(self.bonds))}
+            )
+            record = {
+                "topology": topology,
+                "optimizer": optimizer,
+                "path": [list(pair) for pair in path],
+            }
+        self.exact_path_seconds = time.perf_counter() - start
+        current = [list(site) for site in inputs]
+        steps = []
+        for pair in path:
+            if (
+                len(pair) != 2
+                or len(set(pair)) != 2
+                or any(i < 0 or i >= len(current) for i in pair)
+            ):
+                raise ValueError("Invalid pair in saved contraction path.")
+            a, b = pair
+            common = [ix for ix in current[a] if ix in current[b]]
+            axes = (
+                [current[a].index(ix) for ix in common],
+                [current[b].index(ix) for ix in common],
+            )
+            remaining = [ix for ix in current[a] + current[b] if ix not in common]
+            current = [site for i, site in enumerate(current) if i not in (a, b)]
+            current.append(remaining)
+            steps.append((a, b, axes))
+        if current != [[]]:
+            raise ValueError(
+                "The contraction path does not reduce the network to a scalar."
+            )
+        self.exact_shapes, self.exact_steps = shapes, steps
+        self.exact_path_record = record
+        if path_file is not None and not path_file.exists():
+            path_file.parent.mkdir(parents=True, exist_ok=True)
+            path_file.write_text(json.dumps(record, indent=2) + "\n")
 
     def padded_grid(self, tensors):
         """Adapt sliced tensors to the existing contractor's uniform grid layout."""
@@ -192,8 +269,8 @@ class FermionPEPS:
             K.stack(padded), (self.rows, self.columns) + (self.bond_dim,) * 4
         )
 
-    def boundary_scores(self, theta, occupation):
-        """Hole environments, Eq. (12) of arXiv:2506.20106; no AD through compression."""
+    def boundary_environments(self, theta, occupation):
+        """Reuse the library's row compression for upper and lower environments."""
         K = tc.backend
         sliced = self.sliced_tensors(theta, occupation)
         grid = self.padded_grid(sliced)
@@ -218,6 +295,13 @@ class FermionPEPS:
             )
             upper.append(value)
         upper = upper[::-1]
+        return sliced, grid, lower, upper
+
+    def boundary_scores(self, theta, occupation):
+        """Hole environments, Eq. (12) of arXiv:2506.20106; no AD through compression."""
+        K = tc.backend
+        sliced, grid, lower, upper = self.boundary_environments(theta, occupation)
+        chi, D = self.boundary_dim, self.bond_dim
         endpoint = K.scatter(
             K.zeros((chi, chi, D), dtype="complex128"),
             K.convert_to_tensor([[0, 0, 0]]),
@@ -272,6 +356,121 @@ class FermionPEPS:
                 scores.append(K.reshape(derivative, (-1,))[self.allowed[i]])
         return self.amplitude(theta, occupation), K.concat(scores)
 
+    def boundary_hopping_ratios(self, theta, occupation):
+        """
+        Nearest-neighbor ratios with shared one- and two-row environments.
+
+        A vertical exchange changes the physical/virtual swap signs at every
+        site to its left in both rows. A second left environment carries that
+        string; dropping it would produce incorrect fermion amplitudes.
+        Ratios converge to the exact contractor as the boundary cap increases.
+        """
+        K = tc.backend
+        _, grid, lower, upper = self.boundary_environments(theta, occupation)
+        shape = (self.rows, self.columns)
+        occupations = K.reshape(occupation, shape)
+        right_count = K.sum(occupations, axis=1)[:, None] - K.cumsum(
+            occupations, axis=1
+        )
+        flipped = []
+        for i, tensor in enumerate(self.tensors(theta)):
+            y, x = divmod(i, self.columns)
+            sign = 1 - 2 * K.mod(right_count[y, x] * K.arange(tensor.shape[-1]), 2)
+            flipped.append(tensor[1 - occupation[i]] * sign[None, None, None, :])
+        flipped = self.padded_grid(flipped)
+        chi, D = self.boundary_dim, self.bond_dim
+        parity = 1 - 2 * K.mod(K.arange(D), 2)
+        swap = parity[None, :, None, None]
+        endpoint = K.scatter(
+            K.zeros((chi, chi, D), dtype="complex128"),
+            K.convert_to_tensor([[0, 0, 0]]),
+            K.ones((1,), dtype="complex128"),
+        )
+        horizontal, vertical = [], []
+        for y in range(self.rows):
+            right = [endpoint]
+            for x in range(self.columns - 1, -1, -1):
+                right.append(
+                    K.einsum(
+                        "ABr,adA,buB,dulr->abl",
+                        right[-1],
+                        lower[y][x],
+                        upper[y][x],
+                        grid[y, x],
+                    )
+                )
+            right = right[::-1]
+            denominator = K.sum(endpoint * right[0])
+            left = endpoint
+            for x in range(self.columns - 1):
+                proposal = K.einsum(
+                    "abl,adA,buB,dulr->ABr",
+                    left,
+                    lower[y][x],
+                    upper[y][x],
+                    flipped[y, x] * swap,
+                )
+                proposal = K.einsum(
+                    "abl,adA,buB,dulr->ABr",
+                    proposal,
+                    lower[y][x + 1],
+                    upper[y][x + 1],
+                    flipped[y, x + 1],
+                )
+                horizontal.append(K.sum(proposal * right[x + 2]) / denominator)
+                left = K.einsum(
+                    "abl,adA,buB,dulr->ABr", left, lower[y][x], upper[y][x], grid[y, x]
+                )
+        endpoint = K.scatter(
+            K.zeros((chi, chi, D, D), dtype="complex128"),
+            K.convert_to_tensor([[0, 0, 0, 0]]),
+            K.ones((1,), dtype="complex128"),
+        )
+        for y in range(self.rows - 1):
+            right = [endpoint]
+            for x in range(self.columns - 1, -1, -1):
+                right.append(
+                    K.einsum(
+                        "ABrs,adA,buB,dvlr,vums->ablm",
+                        right[-1],
+                        lower[y][x],
+                        upper[y + 1][x],
+                        grid[y, x],
+                        grid[y + 1, x],
+                    )
+                )
+            right = right[::-1]
+            denominator = K.sum(endpoint * right[0])
+            left_string = endpoint
+            for x in range(self.columns):
+                proposal = K.einsum(
+                    "ablm,adA,buB,dvlr,vums->ABrs",
+                    left_string,
+                    lower[y][x],
+                    upper[y + 1][x],
+                    flipped[y, x],
+                    flipped[y + 1, x],
+                )
+                vertical.append(K.sum(proposal * right[x + 1]) / denominator)
+                left_string = K.einsum(
+                    "ablm,adA,buB,dvlr,vums->ABrs",
+                    left_string,
+                    lower[y][x],
+                    upper[y + 1][x],
+                    grid[y, x] * swap,
+                    grid[y + 1, x] * swap,
+                )
+        ratios = []
+        for i, j, _, _ in self.bonds:
+            y, x = divmod(i, self.columns)
+            value = (
+                horizontal[y * (self.columns - 1) + x]
+                if j == i + 1
+                else vertical[y * self.columns + x]
+            )
+            ratios.append(K.where(occupation[i] != occupation[j], value, 0.0))
+        return K.stack(ratios)
+
     def scores(self, theta, occupation):
         """Holomorphic derivative of log amplitude, with JAX's complex convention."""
         if self.boundary_dim is not None:
@@ -293,13 +492,19 @@ class FermionPEPS:
             [vectors, theta[:, None], (theta * self.physical_index)[:, None]], axis=1
         )
 
-    def gauge_projector(self, theta):
-        """Rank-revealing orthogonal projector removes dependent gauge generators."""
+    def gauge_basis(self, theta):
+        """Orthonormal gauge columns, with dependent columns set to zero."""
         K = tc.backend
         vectors = self.gauge_vectors(theta)
         u, singular, _, _ = K.svd(vectors)
         active = K.cast(K.real(singular) > K.real(singular[0]) * 1e-10, "complex128")
-        return K.eye(self.nparams, dtype="complex128") - (u * active) @ K.adjoint(u)
+        return u * active
+
+    def gauge_projector(self, theta):
+        """Dense reference projector for independent small-system validation."""
+        K = tc.backend
+        basis = self.gauge_basis(theta)
+        return K.eye(self.nparams, dtype="complex128") - basis @ K.adjoint(basis)
 
 
 class Hofstadter:
@@ -347,6 +552,12 @@ class Hofstadter:
         unique = list(dict.fromkeys(x_masks))
         groups = [unique.index(mask) for mask in x_masks]
         self.flips = K.convert_to_tensor(unique)
+        self.hopping_groups = K.convert_to_tensor(
+            [
+                unique.index(tuple(int(k in (i, j)) for k in range(self.nsites)))
+                for i, j in pairs
+            ]
+        )
         self.z_masks = K.convert_to_tensor(z_masks)
         # Pauli terms avoid the full-state dimension limit of backend_mvp_plan.
         self.coefficients = K.convert_to_tensor(
@@ -363,6 +574,12 @@ class Hofstadter:
         K = tc.backend
         signs = 1 - 2 * K.mod(self.z_masks @ occupation, 2)
         matrix_elements = self.grouping @ (self.coefficients * signs)
+        if self.peps.boundary_dim is not None:
+            ratios = self.peps.boundary_hopping_ratios(theta, occupation)
+            return (
+                K.sum(matrix_elements[self.hopping_groups] * ratios)
+                + potential * occupation[self.corner]
+            )
         connected = K.mod(occupation[None, :] + self.flips, 2)
         amplitudes = self.peps.batch_amplitude(theta, connected)
         amplitudes = K.where(

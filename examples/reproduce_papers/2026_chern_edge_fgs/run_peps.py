@@ -9,6 +9,8 @@ PEPS-tVMC and an independent TensorCircuit-NG FGS reference.
 
 import argparse
 import json
+import math
+import importlib.metadata
 from pathlib import Path
 import resource
 import sys
@@ -22,11 +24,11 @@ import tensorcircuit as tc
 if __package__:
     from .main import correlation_at_time, fixed_number_alpha
     from .peps import FermionPEPS, Hofstadter
-    from .tvmc import MonteCarlo
+    from .tvmc import MonteCarlo, sr_cg_solve, sr_solve
 else:
     from main import correlation_at_time, fixed_number_alpha
     from peps import FermionPEPS, Hofstadter
-    from tvmc import MonteCarlo
+    from tvmc import MonteCarlo, sr_cg_solve, sr_solve
 
 
 def peak_memory_mib():
@@ -71,11 +73,23 @@ def fgs_reference(problem, times):
     return tuple(np.asarray(K.numpy(x)) for x in (densities, background, ground_energy))
 
 
-def run_trajectory(sampler, theta, chains, key, dt, steps, potential, imaginary):
+def run_trajectory(
+    sampler,
+    theta,
+    chains,
+    key,
+    dt,
+    steps,
+    potential,
+    imaginary,
+    prepare_euler=False,
+):
     """Stage the entire fixed-step trajectory and transfer diagnostics once."""
     K = tc.backend
     run = K.jit(
-        lambda p, s, k: sampler.trajectory(p, s, k, dt, steps, potential, imaginary)
+        lambda p, s, k: sampler.trajectory(
+            p, s, k, dt, steps, potential, imaginary, prepare_euler
+        )
     )
     started = time.perf_counter()
     theta, chains, key, history = run(theta, chains, key)
@@ -101,65 +115,118 @@ def run_trajectory(sampler, theta, chains, key, dt, steps, potential, imaginary)
     return theta, chains, key, history, elapsed
 
 
-def plot_result(times, density, errors, exact, background, peps, output):
-    """Show raw signed density changes and independent edge-site time traces."""
+def plot_result(
+    times,
+    density,
+    errors,
+    exact,
+    background,
+    peps,
+    output,
+    filename="peps_result.png",
+):
+    """Compare measured densities with FGS using the Figure 2 color conventions."""
     fig = plt.figure(figsize=(12.4, 8.0), layout="constrained")
     layout = fig.add_gridspec(3, 4, height_ratios=(1, 1, 1.15))
     selected = np.linspace(0, len(times) - 1, 4, dtype=int)
     delta, reference_delta = density - background, exact - background
-    limit = float(
-        np.max(np.abs(np.concatenate([delta[selected], reference_delta[selected]])))
+    coordinates = (
+        (0, peps.rows - 1),
+        ((peps.columns - 1) // 2, peps.rows - 1),
+        (peps.columns - 1, peps.rows - 1),
+        (peps.columns - 1, peps.rows // 2),
+    )
+    sites = tuple(y * peps.columns + x for x, y in coordinates)
+    maps = np.concatenate([delta[selected], reference_delta[selected]])
+    below, above = np.any(maps < 0), np.any(maps > 0.04)
+    extend = (
+        "both" if below and above else "min" if below else "max" if above else "neither"
     )
     for row, values in enumerate((reference_delta, delta)):
         for column, index in enumerate(selected):
             ax = fig.add_subplot(layout[row, column])
-            mesh = ax.imshow(
+            mesh = ax.pcolormesh(
+                np.arange(peps.columns + 1),
+                np.arange(peps.rows + 1),
                 values[index].reshape(peps.rows, peps.columns),
-                origin="lower",
-                cmap="RdBu_r",
-                vmin=-limit,
-                vmax=limit,
+                cmap="viridis_r",
+                vmin=0.0,
+                vmax=0.04,
+                edgecolors=(0, 0, 0, 0.15),
+                linewidth=0.3,
             )
             ax.set_title(f"{'FGS' if row == 0 else 'PEPS-tVMC'}  t={times[index]:g}")
-            ax.set_xlabel("x")
-            ax.set_xticks(range(peps.columns))
-            ax.set_yticks(range(peps.rows))
+            ax.set(
+                aspect="equal", xlabel="x", xlim=(0, peps.columns), ylim=(0, peps.rows)
+            )
+            ax.set_xticks(range(0, peps.columns + 1, max(1, peps.columns // 6)))
+            ax.set_yticks(range(0, peps.rows + 1, max(1, peps.rows // 6)))
             if column == 0:
                 ax.set_ylabel("y")
-    fig.colorbar(mesh, ax=fig.axes[:8], label=r"$\delta n_i$")
-    sites = ((peps.rows - 1) * peps.columns, peps.nsites - 1, peps.columns - 1, 0)
-    lower = min(np.min(exact[:, sites]), np.min(density[:, sites] - errors[:, sites]))
-    upper = max(np.max(exact[:, sites]), np.max(density[:, sites] + errors[:, sites]))
+            if row == 0:
+                x, y = coordinates[column]
+                ax.text(
+                    x + 0.5,
+                    y + 0.5,
+                    "ABCD"[column],
+                    color="red",
+                    ha="center",
+                    va="center",
+                )
+    fig.colorbar(
+        mesh,
+        ax=fig.axes[:8],
+        extend=extend,
+        label=r"$\langle n_i(t)\rangle-\langle n_i\rangle_{\rm gs}$",
+    )
+    lower = np.minimum(
+        np.min(exact[:, sites], axis=0),
+        np.min(density[:, sites] - errors[:, sites], axis=0),
+    )
+    upper = np.maximum(
+        np.max(exact[:, sites], axis=0),
+        np.max(density[:, sites] + errors[:, sites], axis=0),
+    )
+    span = max(0.2, float(np.max(upper - lower)) + 0.02)
+    stride = max(1, (len(times) - 1) // 60)
     for column, site in enumerate(sites):
         ax = fig.add_subplot(layout[2, column])
         ax.plot(
-            times, exact[:, site], color="black", linewidth=1.2, zorder=3, label="FGS"
-        )
-        ax.plot(
             times,
-            density[:, site],
+            exact[:, site],
+            color="tab:orange",
+            linewidth=1.2,
+            zorder=3,
+            label="FGS exact",
+        )
+        ax.errorbar(
+            times[::stride],
+            density[::stride, site],
+            yerr=errors[::stride, site],
+            fmt=".",
+            markersize=3,
             color="tab:blue",
-            linewidth=0.7,
-            alpha=0.65,
+            linewidth=0.6,
             zorder=2,
             label="PEPS-tVMC",
         )
-        ax.fill_between(
-            times,
-            density[:, site] - errors[:, site],
-            density[:, site] + errors[:, site],
-            alpha=0.25,
-            color="tab:blue",
+        x, y = coordinates[column]
+        ax.set(
+            title=f"Site {'ABCD'[column]} ({x}, {y})",
+            xlabel="t",
+            ylabel=r"$\langle n_i\rangle$",
+            xlim=(times[0], times[-1]),
         )
-        y, x = divmod(site, peps.columns)
-        ax.set(title=f"Site ({x}, {y})", xlabel="t", ylabel=r"$\langle n_i\rangle$")
-        ax.set_ylim(lower - 0.01, upper + 0.01)
+        center = (lower[column] + upper[column]) / 2
+        ax.set_ylim(center - span / 2, center + span / 2)
         if column == 0:
             ax.legend(fontsize=8)
     fig.suptitle(
-        f"Fermionic PEPS-tVMC · {peps.rows} × {peps.columns}, D={peps.bond_dim}"
+        f"Fermionic PEPS-tVMC · {peps.rows} × {peps.columns}, D={peps.bond_dim}\n"
+        "Paper map scale: 0–0.04; colorbar extensions mark values outside this range",
+        fontsize=12,
     )
-    fig.savefig(output / "peps_result.png", dpi=160)
+    fig.savefig(output / filename, dpi=160)
     plt.close(fig)
 
 
@@ -203,6 +270,160 @@ def profile(problem, sampler, theta, chains, key, output):
     return report
 
 
+def profile_scaling(args):
+    """
+    Reproducible solver-only storage benchmark; run each case in a fresh process.
+
+    Synthetic scores isolate linear algebra from contraction/sampling. Report
+    compiler buffers and device allocator peak separately from host RSS.
+    """
+    K = tc.backend
+    peps = FermionPEPS(args.rows, args.columns, args.bond_dim, boundary_dim=8)
+    count, parameters = args.chains * args.draws, peps.nparams
+    if args.solver not in ("sr", "dense"):
+        raise ValueError("The scaling comparison uses sr or dense.")
+    if args.solver == "dense" and parameters > 6000:
+        raise ValueError(
+            "Dense benchmark limited to P <= 6000; larger cases are estimates only."
+        )
+    key1, key2 = K.random_split(K.get_random_state(args.seed))
+    keys = (*K.random_split(key1), *K.random_split(key2))
+    scores = (
+        K.stateful_randn(keys[0], (count, parameters))
+        + 1j * K.stateful_randn(keys[1], (count, parameters))
+    ) / math.sqrt(2)
+    energies = K.stateful_randn(keys[2], (count,)) + 1j * K.stateful_randn(
+        keys[3], (count,)
+    )
+    weights = K.ones((count,), dtype="float64") / count
+    if args.solver == "sr":
+        function = lambda o, e, w: sr_cg_solve(
+            o, e, w, 1e-3, args.cg_tolerance, args.cg_maxiter
+        )
+    else:
+        # No gauge generators in synthetic data: a zero-width thin basis.
+        function = lambda o, e, w: sr_solve(
+            o,
+            e,
+            w,
+            regulator=1e-3,
+            gauge_basis=K.zeros((parameters, 0), dtype="complex128"),
+        )
+    report, result = timed_executable(function, (scores, energies, weights))
+    report.update(
+        {
+            "rows": args.rows,
+            "columns": args.columns,
+            "D": args.bond_dim,
+            "N": count,
+            "P": parameters,
+            "solver": args.solver,
+            "regulator": 1e-3,
+            "dtype": "complex128",
+            "seed": args.seed,
+            "score_bytes": 16 * count * parameters,
+            "single_dense_metric_bytes": 16 * parameters**2,
+            "synthetic_scores": True,
+            "force_residual_squared": float(result[2]),
+        }
+    )
+    if args.solver == "sr":
+        report.update(
+            {"linear_residual": float(result[3]), "iterations": int(result[4])}
+        )
+        np.testing.assert_allclose(result[3], 0, atol=args.cg_tolerance * 10)
+    return report
+
+
+def timed_executable(function, arguments):
+    """JAX-only profiling boundary; numerical kernels still use tc.backend."""
+    start = time.perf_counter()
+    lowered = tc.backend.jit(function).lower(*arguments)
+    lowering = time.perf_counter() - start
+    start = time.perf_counter()
+    executable = lowered.compile()
+    compilation = time.perf_counter() - start
+    durations = []
+    for _ in range(4):
+        start = time.perf_counter()
+        result = executable(*arguments)
+        for value in result:
+            value.block_until_ready()
+        durations.append(time.perf_counter() - start)
+    memory = executable.memory_analysis()
+    stats = result[0].device.memory_stats()
+    return {
+        "lower_seconds": lowering,
+        "compile_seconds": compilation,
+        "first_seconds": durations[0],
+        "steady_seconds": float(np.median(durations[1:])),
+        "compiler_argument_bytes": memory.argument_size_in_bytes,
+        "compiler_output_bytes": memory.output_size_in_bytes,
+        "compiler_temp_bytes": memory.temp_size_in_bytes,
+        "device_peak_bytes": stats["peak_bytes_in_use"] if stats else None,
+        "host_peak_mib": peak_memory_mib(),
+        "device": str(result[0].device),
+        "jax_version": importlib.metadata.version("jax"),
+        "jaxlib_version": importlib.metadata.version("jaxlib"),
+    }, result
+
+
+def profile_exact_path(args):
+    """Plan once and time the frozen path's amplitude and complex score."""
+    K = tc.backend
+    peps = FermionPEPS(
+        args.rows,
+        args.columns,
+        args.bond_dim,
+        exact_optimizer=args.exact_optimizer,
+        path_file=args.contraction_path,
+    )
+    topology = peps.exact_path_record["topology"]
+    current = [list(site) for site in topology["inputs"]]
+    flops, write, largest = 0, 0, 1
+    for a, b, _ in peps.exact_steps:
+        common = set(current[a]) & set(current[b])
+        remaining = [ix for ix in current[a] + current[b] if ix not in common]
+        size = args.bond_dim ** len(remaining)
+        flops += (2 if common else 1) * args.bond_dim ** len(
+            set(current[a] + current[b])
+        )
+        write += size
+        largest = max(largest, size)
+        current = [site for i, site in enumerate(current) if i not in (a, b)] + [
+            remaining
+        ]
+    report = {
+        "rows": args.rows,
+        "columns": args.columns,
+        "D": args.bond_dim,
+        "optimizer": peps.exact_path_record["optimizer"],
+        "path_search_or_load_seconds": peps.exact_path_seconds,
+        "ntensors": peps.nsites,
+        "nindices": len(peps.bonds),
+        "log10_flops": math.log10(flops),
+        "log2_max_intermediate": math.log2(largest),
+        "log2_write": math.log2(write),
+        "sliced_indices": 0,
+        "slice_tasks": 1,
+        "slicing_seconds": 0,
+        "path": peps.exact_path_record,
+        "opt_einsum_version": importlib.metadata.version("opt_einsum"),
+    }
+    if str(report["optimizer"]).startswith("omeco"):
+        report["omeco_version"] = importlib.metadata.version("omeco")
+    if largest > 2**26:
+        report["execution_skipped"] = (
+            "Forward intermediate exceeds 2**26 complex elements."
+        )
+        return report
+    theta = peps.random_parameters(K.get_random_state(args.seed))
+    occupation = K.cast(K.arange(peps.nsites) < 2 * peps.nsites // 3, "int64")
+    timing, _ = timed_executable(peps.scores, (theta, occupation))
+    report["amplitude_and_score"] = timing
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", type=int, default=3)
@@ -212,13 +433,20 @@ def main():
     parser.add_argument("--chains", type=int, default=256)
     parser.add_argument("--draws", type=int, default=4)
     parser.add_argument("--sweeps", type=int, default=2)
+    parser.add_argument("--contraction-batch-size", type=int, default=256)
     parser.add_argument("--dt", type=float, default=0.01)
     parser.add_argument("--time", type=float, default=1.0)
     parser.add_argument("--prepare-steps", type=int, default=400)
     parser.add_argument("--prepare-dt", type=float, default=0.02)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--initial-state", type=Path)
-    parser.add_argument("--solver", choices=("sr", "minsr"), default="sr")
+    parser.add_argument("--solver", choices=("sr", "minsr", "dense"), default="sr")
+    parser.add_argument("--cg-tolerance", type=float, default=1e-8)
+    parser.add_argument("--cg-maxiter", type=int, default=512)
+    parser.add_argument("--exact-optimizer", default="omeco-8-48")
+    parser.add_argument("--contraction-path", type=Path)
+    parser.add_argument("--scaling-profile", action="store_true")
+    parser.add_argument("--path-profile", action="store_true")
     parser.add_argument("--profile", action="store_true")
     parser.add_argument(
         "--output-dir", type=Path, default=Path(__file__).resolve().parent / "outputs"
@@ -229,9 +457,35 @@ def main():
     tc.set_backend("jax")
     tc.set_dtype("complex128")
     K = tc.backend
-    peps = FermionPEPS(args.rows, args.columns, args.bond_dim, args.boundary_dim)
+    if args.scaling_profile or args.path_profile:
+        report = (
+            profile_scaling(args) if args.scaling_profile else profile_exact_path(args)
+        )
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        (args.output_dir / "scaling_profile.json").write_text(
+            json.dumps(report, indent=2) + "\n"
+        )
+        print(json.dumps(report, indent=2), flush=True)
+        return
+    peps = FermionPEPS(
+        args.rows,
+        args.columns,
+        args.bond_dim,
+        args.boundary_dim,
+        args.exact_optimizer,
+        args.contraction_path,
+    )
     problem = Hofstadter(peps, 2 * peps.nsites // 3)
-    sampler = MonteCarlo(problem, args.chains, args.draws, args.sweeps, args.solver)
+    sampler = MonteCarlo(
+        problem,
+        args.chains,
+        args.draws,
+        args.sweeps,
+        args.solver,
+        contraction_batch_size=args.contraction_batch_size,
+        cg_tolerance=args.cg_tolerance,
+        cg_maxiter=args.cg_maxiter,
+    )
     key, draw = K.random_split(K.get_random_state(args.seed))
     theta = peps.random_parameters(draw)
     key, draw = K.random_split(key)
@@ -261,9 +515,12 @@ def main():
             parser.error(
                 "Initial PEPS does not match the chosen lattice and bond dimension."
             )
-    chains, key, _ = K.jit(lambda p, s, k: sampler.advance(p, s, k, 512))(
-        theta, chains, key
+    thermalize = lambda p, s, k: (
+        sampler.advance(p, s, k, 512)
+        if peps.boundary_dim is None
+        else sampler.sweep(p, s, k, 32)
     )
+    chains, key, _ = K.jit(thermalize)(theta, chains, key)
     if args.initial_state is None:
         preparation_config = {
             "dt": args.prepare_dt,
@@ -274,9 +531,19 @@ def main():
             "seed": args.seed,
             "solver": args.solver,
             "regulator": 1e-4,
+            "cg_tolerance": args.cg_tolerance,
+            "cg_maxiter": args.cg_maxiter,
         }
         preparation = MonteCarlo(
-            problem, args.chains, args.draws, args.sweeps, args.solver, regulator=1e-4
+            problem,
+            args.chains,
+            args.draws,
+            args.sweeps,
+            args.solver,
+            regulator=1e-4,
+            contraction_batch_size=args.contraction_batch_size,
+            cg_tolerance=args.cg_tolerance,
+            cg_maxiter=args.cg_maxiter,
         )
         theta, chains, key, prep_history, prep_seconds = run_trajectory(
             preparation,
@@ -314,6 +581,8 @@ def main():
         "particles": problem.particles,
         "D": args.bond_dim,
         "boundary_dim": args.boundary_dim,
+        "contraction_batch_size": args.contraction_batch_size,
+        "sampling": "random_bonds" if args.boundary_dim is None else "sequential",
         "dt": args.dt,
         "time": args.time,
         "seed": args.seed,
@@ -323,6 +592,11 @@ def main():
         "sweeps": args.sweeps,
         "solver": args.solver,
         "regulator": sampler.regulator,
+        "cg_tolerance": args.cg_tolerance,
+        "cg_maxiter": args.cg_maxiter,
+        "exact_contraction_path": (
+            peps.exact_path_record if peps.boundary_dim is None else None
+        ),
         "preparation_config": preparation_config,
         "ground_state_exact_energy": float(ground_energy),
         "last_preparation_energy": float(prep_history[-1, 0]),

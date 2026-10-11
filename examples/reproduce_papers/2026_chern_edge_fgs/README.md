@@ -2,7 +2,11 @@
 
 This example reproduces **published Figure 2(a)** of Yantao Wu and Jannes Nys, [*Real-Time Dynamics in Two Dimensions with Tensor Network States via Time-Dependent Variational Monte Carlo Method*](https://journals.aps.org/prxquantum/abstract/10.1103/tggc-8fjx), PRX Quantum **7**, 033035 (2026), published 19 August 2026 ([arXiv:2512.06768](https://arxiv.org/abs/2512.06768)).
 
-`main.py` reproduces the original 12 x 12 **FGS benchmark** using `tc.FGSSimulator`. The additional [fermionic PEPS-tVMC example](PEPS.md) implements sampled VMC preparation and real-time evolution for the same quench, using TensorCircuit-NG's contractors/backend and TenCirPauli's fermion operators. Its default 3 x 3, D=2 run takes about four minutes on a CPU, including ground-state preparation and evolution to t=1. Its small-system checks target the method behind Figure 2(b,c); they do not reproduce the paper's original-size PEPS accuracy or performance claims.
+`main.py` reproduces the original 12 x 12 **FGS benchmark** using `tc.FGSSimulator`. The [fermionic PEPS-tVMC example](PEPS.md) now follows the corner quench on **6 x 6 sites with 24 particles and D=4**, with independent VMC preparation and evolution to t=8. The real-time evolution and independent measurements use cached exact single-layer PEPS contractions. PEPS and FGS share the same 0–0.04 color scale. The residual row and saved signed arrays expose the remaining error.
+
+![6 x 6 PEPS-tVMC compared with the exact Gaussian solution](outputs/6x6/peps_6x6.png)
+
+See [PEPS.md](PEPS.md) for the preparation checkpoint, numerical settings, independent uncertainties, solver comparisons and reproduction commands. This is a scaled method reproduction of Figure 2(b,c); it does not reproduce the paper's original 12 x 12 PEPS trajectory or performance. `run_peps.py` retains the small 3 x 3 CPU demonstration.
 
 ## Run the FGS benchmark
 
