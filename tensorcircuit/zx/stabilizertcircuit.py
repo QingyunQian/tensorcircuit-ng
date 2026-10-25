@@ -144,6 +144,9 @@ class StabilizerTCircuit(AbstractCircuit):
         self._num_observables = 0
         # Probability-evaluation cache (mode="joint"), independent of sampling.
         self._compiled_probs: Optional[CompiledProgram] = None
+        self._compiled_expectations: Dict[
+            Tuple[Any, ...], Tuple[Any, List[str], Any]
+        ] = {}
         self._channel_sampler_probs: Optional[ChannelSampler] = None
 
     def _merge_qir(self) -> List[Dict[str, Any]]:
@@ -392,7 +395,7 @@ class StabilizerTCircuit(AbstractCircuit):
 
         graph = build_amplitude_graph(built, state)  # type: ignore[arg-type]
         pyzx.full_reduce(graph, paramSafe=True)
-        graphs = find_stab(graph, strategy=self.strategy)
+        graphs = find_stab(graph, strategy=self.strategy, pre_reduced=True)
         compiled = compile_scalar_graphs(graphs, [])
         dummy_f = jnp.zeros((1, 0), dtype=jnp.bool_)
         amp = evaluate(compiled, dummy_f)
@@ -444,23 +447,27 @@ class StabilizerTCircuit(AbstractCircuit):
             for i in z:
                 pauli_dict[i] = "Z"
 
-        prepared = prepare_graph(
-            self,
-            sample_detectors=False,
-            force_measure_all=False,
-            pauli=pauli_dict,
-            reset_scalar=False,
-        )
-        graphs = find_stab(prepared.graph, strategy=self.strategy)
-        param_names = sorted(
-            [
-                p
-                for p in get_params(prepared.graph)
-                if p != "1" and (p.startswith("e") or p.startswith("f"))
-            ],
-            key=lambda p: (p[0], int(p[1:])),
-        )
-        compiled = compile_scalar_graphs(graphs, param_names)
+        key = (self.strategy, tuple(sorted(pauli_dict.items())))
+        if key not in self._compiled_expectations:
+            prepared = prepare_graph(
+                self,
+                sample_detectors=False,
+                force_measure_all=False,
+                pauli=pauli_dict,
+                reset_scalar=False,
+            )
+            graphs = find_stab(prepared.graph, strategy=self.strategy, pre_reduced=True)
+            param_names = sorted(
+                [
+                    p
+                    for p in get_params(prepared.graph)
+                    if p != "1" and (p.startswith("e") or p.startswith("f"))
+                ],
+                key=lambda p: (p[0], int(p[1:])),
+            )
+            compiled = compile_scalar_graphs(graphs, param_names)
+            self._compiled_expectations[key] = prepared, param_names, compiled
+        prepared, param_names, compiled = self._compiled_expectations[key]
 
         if prepared.num_error_bits == 0:
             vals = evaluate(compiled, jnp.zeros((1, 0), dtype=jnp.bool_))
@@ -532,6 +539,7 @@ class StabilizerTCircuit(AbstractCircuit):
 
     def _append_instruction(self, instruction: Dict[str, Any]) -> None:
         self._qir.append(instruction)
+        self._compiled_expectations.clear()
         self._compiled_program_measurements = None
         self._channel_sampler_measurements = None
         self._compiled_program_detectors = None
