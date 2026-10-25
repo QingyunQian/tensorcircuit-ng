@@ -1756,3 +1756,45 @@ def test_correlation_selected_bits_dynamic_indices(backend):
             tc.backend.convert_to_tensor(np.array(indices, dtype=np.int32)), samples
         )
         np.testing.assert_allclose(tc.backend.numpy(value), expected, atol=1e-6)
+
+
+@pytest.mark.parametrize("backend", [lf("npb"), lf("tfb"), lf("jaxb"), lf("torchb")])
+@pytest.mark.parametrize("dim", [2, 3])
+def test_pure_anti_flatness_partitions(backend, highp, dim):
+    rng = np.random.default_rng(31)
+    state = rng.normal(size=dim**3) + 1j * rng.normal(size=dim**3)
+    state /= np.linalg.norm(state)
+    state = tc.backend.convert_to_tensor(state)
+    for keep in [[], [2, 0], [1], [0, 1, 2]]:
+        rho = qu.reduced_density_matrix(state, subsystem_to_keep=keep, dim=dim)
+        np.testing.assert_allclose(
+            qu.entanglement_anti_flatness(state, subsystem_to_keep=keep, dim=dim),
+            qu.anti_flatness(rho),
+            atol=1e-12,
+        )
+    mixed = np.diag(np.arange(1, dim**3 + 1, dtype=np.complex128))
+    mixed /= np.trace(mixed)
+    mixed = tc.backend.convert_to_tensor(mixed)
+    rho = qu.reduced_density_matrix(mixed, subsystem_to_keep=[2, 0], dim=dim)
+    np.testing.assert_allclose(
+        qu.entanglement_anti_flatness(mixed, subsystem_to_keep=[2, 0], dim=dim),
+        qu.anti_flatness(rho),
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("backend", [lf("jaxb"), lf("tfb"), lf("torchb")])
+def test_pure_anti_flatness_large_side_gradient(backend):
+    def loss(theta, keep):
+        c = tc.Circuit(3)
+        c.ry(0, theta=theta)
+        c.cnot(0, 1)
+        return qu.entanglement_anti_flatness(c.state(), subsystem_to_keep=keep)
+
+    theta = tc.backend.convert_to_tensor(0.31)
+    large = tc.backend.jit(tc.backend.value_and_grad(lambda t: loss(t, [2, 0])))
+    small = tc.backend.value_and_grad(lambda t: loss(t, [1]))
+    for actual, expected in zip(large(theta), small(theta)):
+        np.testing.assert_allclose(
+            tc.backend.numpy(actual), tc.backend.numpy(expected), atol=1e-6
+        )
