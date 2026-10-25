@@ -1756,3 +1756,31 @@ def test_correlation_selected_bits_dynamic_indices(backend):
             tc.backend.convert_to_tensor(np.array(indices, dtype=np.int32)), samples
         )
         np.testing.assert_allclose(tc.backend.numpy(value), expected, atol=1e-6)
+
+
+def test_renyi_half_powers(npb, highp):
+    rho = np.array([[0.6, 0.1 + 0.2j], [0.1 - 0.2j, 0.4]], dtype=np.complex128)
+    for order in [3, 4, 5, 8, 9]:
+        expected = np.log(np.trace(np.linalg.matrix_power(rho, order))).real / (
+            1 - order
+        )
+        np.testing.assert_allclose(qu.renyi_entropy(rho, order), expected, atol=1e-12)
+        np.testing.assert_allclose(
+            qu.renyi_entropy(qu.QuOperator.from_tensor(rho), order),
+            expected,
+            atol=1e-12,
+        )
+
+
+@pytest.mark.parametrize("backend", [lf("tfb"), lf("jaxb"), lf("torchb")])
+def test_renyi_half_power_gradient(backend):
+    def loss(t, k):
+        probabilities = tc.backend.stack([t, 1 - t])
+        rho = tc.backend.diagflat(probabilities)
+        return qu.renyi_entropy(rho, k)
+
+    for k in [3, 4, 9]:
+        t = tc.backend.convert_to_tensor(0.3)
+        actual = tc.backend.jit(tc.backend.grad(lambda x: loss(x, k)))(t)
+        expected = k * (0.3 ** (k - 1) - 0.7 ** (k - 1)) / ((1 - k) * (0.3**k + 0.7**k))
+        np.testing.assert_allclose(tc.backend.numpy(actual), expected, atol=2e-5)

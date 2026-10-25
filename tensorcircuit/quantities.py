@@ -486,13 +486,20 @@ def renyi_entropy(rho: Union[Tensor, QuOperator], k: int = 2) -> Tensor:
     :rtype: Tensor
     """
     if (
-        k == 2
+        k >= 2
         and not isinstance(rho, QuOperator)
         and len(rho.shape) == 2
         and rho.shape[0] == rho.shape[1]
     ):
-        purity = backend.sum(rho * backend.transpose(rho))
-        return -backend.real(backend.log(purity))
+        rho = backend.convert_to_tensor(rho)
+        half = rho
+        for bit in bin(k // 2)[3:]:
+            half = backend.matmul(half, half)
+            if bit == "1":
+                half = backend.matmul(half, rho)
+        other = half if k % 2 == 0 else backend.matmul(half, rho)
+        moment = backend.sum(half * backend.transpose(other))
+        return backend.real(backend.log(moment)) / (1 - k)
     s = 1 / (1 - k) * backend.real(backend.log(trace_product(*[rho] * k)))
     return s
 
