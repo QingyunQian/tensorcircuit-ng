@@ -1756,3 +1756,42 @@ def test_correlation_selected_bits_dynamic_indices(backend):
             tc.backend.convert_to_tensor(np.array(indices, dtype=np.int32)), samples
         )
         np.testing.assert_allclose(tc.backend.numpy(value), expected, atol=1e-6)
+
+
+@pytest.mark.parametrize("backend", [lf("npb"), lf("tfb"), lf("jaxb"), lf("torchb")])
+def test_trace_distance_hermitian_spectrum(backend, highp):
+    rng = np.random.default_rng(51)
+    a = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    rho = a @ a.conj().T
+    rho /= np.trace(rho)
+    rho0 = np.eye(4, dtype=np.complex128) / 4
+    eps = 1e-8
+    expected = (
+        0.5 * np.sqrt(np.linalg.svd(rho - rho0, compute_uv=False) ** 2 + eps).sum()
+    )
+    np.testing.assert_allclose(qu.trace_distance(rho, rho0, eps), expected, atol=1e-12)
+    np.testing.assert_allclose(
+        qu.trace_distance(rho, rho, eps), 2 * np.sqrt(eps), atol=1e-12
+    )
+
+
+@pytest.mark.parametrize("backend", [lf("jaxb"), lf("tfb"), lf("torchb")])
+def test_trace_distance_repeated_spectrum_gradient(backend):
+    signs = tc.backend.convert_to_tensor(
+        np.diag([1.0, 1.0, -1.0, -1.0]).astype(np.float32)
+    )
+    rho0 = tc.backend.eye(4, dtype="float32") / 4
+    eps = 1e-4
+    f = tc.backend.jit(
+        tc.backend.value_and_grad(
+            lambda t: qu.trace_distance(rho0 + t * signs, rho0, eps)
+        )
+    )
+    for t in [0.0, 0.1]:
+        value, gradient = f(tc.backend.convert_to_tensor(t))
+        np.testing.assert_allclose(
+            tc.backend.numpy(value), 2 * np.sqrt(t * t + eps), atol=1e-6
+        )
+        np.testing.assert_allclose(
+            tc.backend.numpy(gradient), 2 * t / np.sqrt(t * t + eps), atol=1e-6
+        )
