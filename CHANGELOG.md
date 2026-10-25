@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Add optional snapshot chunking to global classical-shadow reconstruction and entropy estimation.
+
 - Reduce JAX SVD backward memory and computation for rectangular matrices by avoiding full-size projection matrices.
 - Import Qiskit initialization states by reversing tensor axes instead of allocating a dense permutation matrix.
 - Compute second-order Rényi entropy directly from dense matrix entries, avoiding a cubic-cost matrix product.

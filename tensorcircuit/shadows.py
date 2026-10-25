@@ -169,6 +169,8 @@ def global_shadow_state(
     snapshots: Tensor,
     pauli_strings: Optional[Tensor] = None,
     sub: Optional[Sequence[int]] = None,
+    *,
+    chunk_size: Optional[int] = None,
 ) -> Tensor:
     r"""To generate the global shadow state from local snapshot states or snapshots and pauli strings.
     This is the recommended implementation as it typically offers the best performance
@@ -179,6 +181,9 @@ def global_shadow_state(
     :type: Optional[Tensor]
     :param sub: qubit indices of subsystem
     :type: Optional[Sequence[int]]
+
+    :param chunk_size: Maximum snapshots expanded together. None vectorizes all snapshots.
+    :type chunk_size: Optional[int]
 
     :return gsdw_state: shape = (2 ** nq, 2 ** nq)
     :rtype: Tensor
@@ -206,6 +211,25 @@ def global_shadow_state(
         return res
 
     v = backend.vmap(tensor_prod, vectorized_argnums=0)
+    if chunk_size is not None:
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive.")
+        states = backend.reshape(lss_states, (-1, nq, 2, 2))
+        count = states.shape[0]
+        complete = count // chunk_size
+        total = backend.zeros((2**nq, 2**nq), dtype=lss_states.dtype)
+        if complete:
+            chunks = backend.reshape(
+                states[: complete * chunk_size], (complete, chunk_size, nq, 2, 2)
+            )
+            total = backend.scan(
+                lambda carry, chunk: carry + backend.sum(v(chunk), axis=0),
+                chunks,
+                total,
+            )
+        if count % chunk_size:
+            total = total + backend.sum(v(states[complete * chunk_size :]), axis=0)
+        return total / count
     vv = backend.vmap(v, vectorized_argnums=0)
     gss_states = vv(lss_states)
     return backend.mean(gss_states, axis=(0, 1))
@@ -326,6 +350,7 @@ def entropy_shadow(
     *,
     subsystem_to_keep: Optional[Sequence[int]] = None,
     subsystems_to_trace_out: Optional[Sequence[int]] = None,
+    chunk_size: Optional[int] = None,
 ) -> Tensor:
     r"""To calculate the Renyi entropy of a subsystem from shadow state or shadow snapshot states
 
@@ -356,6 +381,9 @@ def entropy_shadow(
     :param subsystems_to_trace_out: qubit indices to trace out (complement is kept).
     :type subsystems_to_trace_out: Optional[Sequence[int]]
 
+    :param chunk_size: Maximum snapshots expanded together during reconstruction.
+    :type chunk_size: Optional[int]
+
     :return Renyi entropy: shape = ()
     :rtype: Tensor
     """
@@ -367,7 +395,7 @@ def entropy_shadow(
         nq, sub, subsystem_to_keep, subsystems_to_trace_out, name="entropy_shadow"
     )
 
-    sdw_rdm = global_shadow_state(snapshots, pauli_strings, keep)  # (2 ** nq, 2 ** nq)
+    sdw_rdm = global_shadow_state(snapshots, pauli_strings, keep, chunk_size=chunk_size)
 
     evs = backend.relu(backend.real(backend.eigvalsh(sdw_rdm)))
     evs /= backend.sum(evs)

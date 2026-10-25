@@ -287,3 +287,56 @@ def test_raw_shadow_expectation(backend):
     for basis in (bases, bases[:, None, :]):
         actual = evaluate(samples, k.convert_to_tensor(basis), observable)
         np.testing.assert_allclose([k.numpy(v) for v in actual], [6.0, 0.0], atol=1e-6)
+
+
+@pytest.mark.parametrize("backend", [lf("npb"), lf("jaxb"), lf("tfb"), lf("torchb")])
+def test_chunked_global_shadow_state(backend):
+    rng = np.random.default_rng(91)
+    states = (
+        rng.normal(size=(3, 3, 2, 2, 2)) + 1j * rng.normal(size=(3, 3, 2, 2, 2))
+    ).astype(np.complex64)
+    expected = np.mean(
+        [np.kron(s[0], s[1]) for s in states.reshape(9, 2, 2, 2)], axis=0
+    )
+    states = tc.backend.convert_to_tensor(states)
+    for chunk in [1, 4, 20]:
+        f = tc.backend.jit(lambda x: global_shadow_state(x, chunk_size=chunk))
+        np.testing.assert_allclose(tc.backend.numpy(f(states)), expected, atol=1e-6)
+    with pytest.raises(ValueError, match="chunk_size"):
+        global_shadow_state(states, chunk_size=0)
+
+
+@pytest.mark.parametrize("backend", [lf("jaxb"), lf("tfb"), lf("torchb")])
+def test_chunked_shadow_gradient(backend):
+    states = tc.backend.cast(tc.backend.ones((2, 3, 2, 2, 2)), "complex64")
+
+    def loss(t, chunk):
+        return tc.backend.real(
+            tc.backend.sum(
+                global_shadow_state(
+                    states * tc.backend.cast(t, "complex64"), chunk_size=chunk
+                )
+            )
+        )
+
+    t = tc.backend.convert_to_tensor(0.7)
+    expected = tc.backend.value_and_grad(lambda x: loss(x, None))(t)
+    actual = tc.backend.jit(tc.backend.value_and_grad(lambda x: loss(x, 4)))(t)
+    for a, b in zip(actual, expected):
+        np.testing.assert_allclose(tc.backend.numpy(a), tc.backend.numpy(b), atol=1e-5)
+
+
+@pytest.mark.parametrize("backend", [lf("jaxb"), lf("tfb")])
+def test_chunked_entropy_preserves_clipping(backend):
+    snapshots = tc.backend.convert_to_tensor(
+        np.array([[[0, 0]], [[0, 1]], [[1, 0]]], dtype=np.int32)
+    )
+    paulis = tc.backend.convert_to_tensor(np.full((3, 2), 3, dtype=np.int32))
+    for alpha in [1, 2, 3]:
+        expected = entropy_shadow(snapshots, paulis, alpha=alpha)
+        actual = tc.backend.jit(
+            lambda s, p: entropy_shadow(s, p, alpha=alpha, chunk_size=2)
+        )(snapshots, paulis)
+        np.testing.assert_allclose(
+            tc.backend.numpy(actual), tc.backend.numpy(expected), atol=1e-6
+        )
