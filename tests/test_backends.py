@@ -1936,3 +1936,22 @@ def test_sqrtmh_fixed_rank_gradient(backend, highp):
     derivative = k.grad(loss)
     for evaluate in (derivative, k.jit(derivative)):
         np.testing.assert_allclose(k.numpy(evaluate(theta)), -np.sin(0.6), atol=1e-7)
+
+
+@pytest.mark.parametrize("backend", [lf("tfb"), lf("jaxb")])
+@pytest.mark.parametrize("mode", ["jacfwd", "jacrev", "hessian"])
+def test_jacobian_selected_inputs_remain_dynamic(backend, mode):
+    def f(params, data, scale=1.0):
+        value = scale * params**3 * tc.backend.sum(data, axis=1)
+        return tc.backend.sum(value) if mode == "hessian" else value
+
+    transform = tc.backend.jit(getattr(tc.backend, mode)(f, argnums=0))
+    params = tc.backend.convert_to_tensor(np.array([0.2, 0.4, 0.7], dtype=np.float32))
+    for scale in [1.0, 2.0]:
+        data = tc.backend.convert_to_tensor(np.full((3, 7), scale, dtype=np.float32))
+        actual = transform(params, data, scale=0.5)
+        p = np.array([0.2, 0.4, 0.7])
+        diagonal = 0.5 * 7 * scale * (6 * p if mode == "hessian" else 3 * p**2)
+        np.testing.assert_allclose(
+            tc.backend.numpy(actual), np.diag(diagonal), atol=2e-6
+        )
