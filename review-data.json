@@ -26470,29 +26470,185 @@
     }
   },
   "pull_request": {
-    "head_commit": "8712692cdff7db4476c083849eb2bfb790459190",
+    "head_commit": "deed367b33aa9517b92ec61bbc7741227ddafe12",
     "measured_commit": "06303e43ef26ef2ad40ca58ba35bed6fca7e33f9",
-    "source_and_tests_identical_to_measured_commit": true,
-    "equivalence_check": "git diff --quiet <measured-commit> <head-commit> -- tensorcircuit tests returned exit 0.",
-    "note": "The documented PR head changes only files outside the runtime package and tests; the running benchmark checkout was not modified."
+    "source_and_tests_identical_to_measured_commit": false,
+    "note": "The PR changes Hamiltonian argument packing and adds documentation/tests after the recorded measurements. The measured commit and its source hashes remain unchanged."
   },
   "current_head_ci": {
-    "head_commit": "8712692cdff7db4476c083849eb2bfb790459190",
-    "run_id": 45358364568,
-    "url": "https://github.com/tensorcircuit/tensorcircuit-ng/actions/runs/45358364568",
+    "head_commit": "deed367b33aa9517b92ec61bbc7741227ddafe12",
+    "run_id": 45411836001,
+    "url": "https://github.com/tensorcircuit/tensorcircuit-ng/actions/runs/45411836001",
     "status": "completed",
     "conclusion": "success",
     "jobs": [
       {
-        "id": 138321800454,
+        "id": 138507405896,
         "name": "test (ubuntu-22.04, 3.12)",
+        "status": "completed",
         "conclusion": "success"
       },
       {
-        "id": 138321801060,
+        "id": 138507406437,
         "name": "minimal install smoke",
+        "status": "completed",
         "conclusion": "success"
       }
     ]
-  }
+  },
+  "previous_pull_request_snapshots": [
+    {
+      "pull_request": {
+        "head_commit": "8712692cdff7db4476c083849eb2bfb790459190",
+        "measured_commit": "06303e43ef26ef2ad40ca58ba35bed6fca7e33f9",
+        "source_and_tests_identical_to_measured_commit": true,
+        "equivalence_check": "git diff --quiet <measured-commit> <head-commit> -- tensorcircuit tests returned exit 0.",
+        "note": "The documented PR head changes only files outside the runtime package and tests; the running benchmark checkout was not modified."
+      },
+      "current_head_ci": {
+        "head_commit": "8712692cdff7db4476c083849eb2bfb790459190",
+        "run_id": 45358364568,
+        "url": "https://github.com/tensorcircuit/tensorcircuit-ng/actions/runs/45358364568",
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": [
+          {
+            "id": 138321800454,
+            "name": "test (ubuntu-22.04, 3.12)",
+            "conclusion": "success"
+          },
+          {
+            "id": 138321801060,
+            "name": "minimal install smoke",
+            "conclusion": "success"
+          }
+        ]
+      }
+    }
+  ],
+  "post_measurement_revision": {
+    "head_commit": "deed367b33aa9517b92ec61bbc7741227ddafe12",
+    "measured_commit": "06303e43ef26ef2ad40ca58ba35bed6fca7e33f9",
+    "measured_call": "Lindblad2PauliStringSum(h_structures, h_weights, jumps)",
+    "current_call": "Lindblad2PauliStringSum((h_structures, h_weights), jumps=jumps)",
+    "numerical_implementation_unchanged": true,
+    "benchmarks_rerun": false,
+    "reproduction_script": {
+      "name": "benchmark_tuple_api.py",
+      "sha256": "46cda5015b0213e2e6612e2144f4a4abd27e99ead0534eabb5cd08f3b148d565",
+      "measured_base_script_sha256": "35771065664babf5107fd2b9e24933871ac65278c476a9240aa6d6a18c1f3acb",
+      "used_for_reported_measurements": false,
+      "baseline_api": "The before worker explicitly uses the measured legacy call."
+    }
+  },
+  "current_head_validation": {
+    "head_commit": "deed367b33aa9517b92ec61bbc7741227ddafe12",
+    "status": "passed",
+    "checks": {
+      "targeted_exit_zero": true,
+      "targeted_pytest_passed": true,
+      "black_passed": true,
+      "mypy_passed": true,
+      "three_pylint_runs_passed": true,
+      "full_pytest_passed": true,
+      "sphinx_english_build_succeeded": true,
+      "sphinx_chinese_build_succeeded": true,
+      "fullcheck_exit_zero": true,
+      "completion_marker_present": true,
+      "validated_changed_files_match_head": true,
+      "source_files_unchanged_during_validation": true
+    },
+    "numerical_implementation_unchanged": true,
+    "numerical_implementation_comparison_base": "8712692cdff7db4476c083849eb2bfb790459190",
+    "numerical_implementation_review": "The production diff changes the translator public tuple signature and unpacks that tuple; its tensor expressions and solver implementation are unchanged. Other changes are documentation and tests.",
+    "started_utc": "2026-11-24T14:07:26Z",
+    "finished_utc": "2026-11-24T15:43:26Z",
+    "summary_generated_utc": "2026-11-24T15:44:48.046208+00:00",
+    "source_provenance": {
+      "scope": "The six files changed by this reviewer-update commit were compared byte-for-byte with the frozen validation snapshot.",
+      "head_commit": "deed367b33aa9517b92ec61bbc7741227ddafe12",
+      "base_commit": "8712692cdff7db4476c083849eb2bfb790459190",
+      "all_changed_files_byte_equal": true,
+      "file_sha256": {
+        "CHANGELOG.md": "b581512afbbca2dd802d167a83ca03c99fc3041e48de0ad1653993de7f8b2fd2",
+        "docs/source/advance.rst": "0f31cced1e38775351b324926765db9fb6f37aed4353826ad06994d34c40cc35",
+        "tensorcircuit/quantum.py": "d281c134839f09ffefac4624b50250976bd4369a107e856e20cfeae0c9520a8d",
+        "tensorcircuit/timeevol.py": "490291e50465153cef28b5d383a4cdc8be3d3f7569a4c62657ba67d7ccec3a6a",
+        "tests/test_quantum.py": "bfad515064f899b09665fbcd7970a1906f29cfb99a90d421f8724fbb8b0499a5",
+        "tests/test_timeevol.py": "c3145540813379da238d2650651754d07215402947eb383e63dae9175bf9e26f"
+      }
+    },
+    "targeted": {
+      "test_modules": [
+        "tests/test_quantum.py",
+        "tests/test_timeevol.py"
+      ],
+      "selection": "Lindblad2PauliStringSum or mesolve",
+      "exit_code": 0,
+      "summary": "16 passed, 2 warnings in 193.52s (0:03:13)",
+      "counts": {
+        "passed": 16,
+        "warnings": 2
+      },
+      "duration_seconds": 193.52
+    },
+    "complete_check_all": {
+      "command": "bash check_all.sh",
+      "exit_code": 0,
+      "passed": true,
+      "black_files": 517,
+      "mypy_files": 133,
+      "pylint_scores": [
+        10.0,
+        10.0,
+        10.0
+      ],
+      "pylint_scopes": [
+        "tensorcircuit tests examples/*.py",
+        "examples/reproduce_papers",
+        "examples/challenge_suite"
+      ],
+      "pytest": {
+        "summary": "3612 passed, 67 skipped, 3 xfailed, 28 warnings in 2553.27s (0:42:33)",
+        "counts": {
+          "passed": 3612,
+          "skipped": 67,
+          "xfailed": 3,
+          "warnings": 28
+        },
+        "duration_seconds": 2553.27
+      },
+      "sphinx_summaries": [
+        "build succeeded, 818 warnings.",
+        "build succeeded, 895 warnings."
+      ],
+      "sphinx_builds": [
+        {
+          "language": "en",
+          "status": "passed",
+          "summary": "build succeeded, 818 warnings.",
+          "warnings": 818,
+          "output_confirmation": true
+        },
+        {
+          "language": "zh",
+          "status": "passed",
+          "summary": "build succeeded, 895 warnings.",
+          "warnings": 895,
+          "output_confirmation": true
+        }
+      ],
+      "completion_marker": "all checks passed, congratulation!"
+    },
+    "evidence": {
+      "execution": "Existing remote CPU validation; no tests or benchmarks were restarted for this audit.",
+      "timing_scope": "The start and finish timestamps cover targeted tests followed by the complete check_all.sh run.",
+      "log_sha256": {
+        "targeted.log": "228402169befbbe029271681aa5c28f47503468ddac71b400b15b64541eaa23a",
+        "fullcheck.log": "a9ec665a204c29a1e996bb1734076768932bc79d6111629a7c321adc0c779db1"
+      },
+      "check_all_script_sha256": "6e38703d72c2fbd79216a5aaa9062d831cd0f30601634f77bd06661ff4c1929d"
+    }
+  },
+  "metadata_updated_at_utc": "2026-11-24T15:46:25.901816+00:00"
 }
